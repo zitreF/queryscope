@@ -19,11 +19,16 @@ dependencies {
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
+    testImplementation(libs.bytebuddy.agent)
+    testImplementation(libs.servlet.api)
+    testImplementation(libs.h2)
+    testImplementation(libs.hikaricp)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
 tasks.test {
     useJUnitPlatform()
+    jvmArgs("-XX:+EnableDynamicAgentLoading", "-Djdk.attach.allowAttachSelf=true")
 }
 
 tasks.jar {
@@ -32,9 +37,12 @@ tasks.jar {
 
 tasks.shadowJar {
     archiveFileName = "queryscope.jar"
-    relocate("net.bytebuddy", "me.fertiz.queryscope.shaded.bytebuddy")
+    relocate("net.bytebuddy", "me.fertiz.queryscope.agent.shaded.bytebuddy")
     exclude("module-info.class", "META-INF/versions/*/module-info.class")
     manifest {
-        attributes("Premain-Class" to "me.fertiz.queryscope.agent.QueryScopeAgent")
+        attributes(
+            "Premain-Class" to "me.fertiz.queryscope.agent.QueryScopeAgent",
+            "Can-Retransform-Classes" to "true",
+        )
     }
 }
