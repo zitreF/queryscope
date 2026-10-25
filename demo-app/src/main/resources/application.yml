@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: queryscope-demo
+  datasource:
+    url: jdbc:h2:mem:shop
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
