@@ -1,20 +1,52 @@
 package me.fertiz.queryscope.agent.report;
 
+import me.fertiz.queryscope.agent.analysis.SqlNormalizer;
+import me.fertiz.queryscope.agent.data.Finding;
+import me.fertiz.queryscope.agent.data.NPlusOne;
+import me.fertiz.queryscope.agent.data.RequestReport;
 import me.fertiz.queryscope.agent.data.RequestTrace;
+import me.fertiz.queryscope.agent.data.SlowQuery;
 
 import java.util.Locale;
 import java.util.function.Consumer;
 
-public final class ConsoleReporter implements Consumer<RequestTrace> {
+public final class ConsoleReporter implements Consumer<RequestReport> {
 
     private static final System.Logger LOGGER = System.getLogger("QueryScope");
+    private static final int MAX_SQL_LENGTH = 160;
 
     @Override
-    public void accept(RequestTrace trace) {
+    public void accept(RequestReport report) {
+        RequestTrace trace = report.trace();
         if (trace.queries().isEmpty()) {
             return;
         }
         LOGGER.log(System.Logger.Level.INFO, () -> String.format(Locale.ROOT, "%s %s -> %d, %d queries in %.1f ms",
-                trace.method(), trace.path(), trace.status(), trace.queries().size(), trace.durationNanos() / 1e6));
+                trace.method(), trace.path(), trace.status(), trace.queries().size(), millis(trace.durationNanos())));
+        for (Finding finding : report.findings()) {
+            LOGGER.log(System.Logger.Level.WARNING, () -> describe(finding));
+        }
+    }
+
+    private static String describe(Finding finding) {
+        if (finding instanceof NPlusOne nPlusOne) {
+            return String.format(Locale.ROOT, "N+1: %d x %s%s", nPlusOne.executions(),
+                    shorten(nPlusOne.normalizedSql()), location(nPlusOne.callSite()));
+        }
+        SlowQuery slow = (SlowQuery) finding;
+        return String.format(Locale.ROOT, "Slow query: %.1f ms %s%s", millis(slow.query().durationNanos()),
+                shorten(SqlNormalizer.normalize(slow.query().sql())), location(slow.query().callSite()));
+    }
+
+    private static String shorten(String sql) {
+        return sql.length() <= MAX_SQL_LENGTH ? sql : sql.substring(0, MAX_SQL_LENGTH) + "...";
+    }
+
+    private static String location(String callSite) {
+        return callSite == null ? "" : " at " + callSite;
+    }
+
+    private static double millis(long nanos) {
+        return nanos / 1_000_000.0;
     }
 }
