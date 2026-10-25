@@ -35,6 +35,10 @@ tasks.jar {
     enabled = false
 }
 
+configurations.consumable("agentJar") {
+    outgoing.artifact(tasks.shadowJar)
+}
+
 tasks.shadowJar {
     archiveFileName = "queryscope.jar"
     relocate("net.bytebuddy", "me.fertiz.queryscope.agent.shaded.bytebuddy")

@@ -17,8 +17,8 @@ public class ReportController {
         this.auditReportService = auditReportService;
     }
 
-    @GetMapping("/audit")
-    public List<EventTypeCount> audit(@RequestParam(defaultValue = "refund") String term) {
-        return auditReportService.countMatching(term);
+    @GetMapping("/customer-activity")
+    public List<CustomerActivity> customerActivity(@RequestParam(defaultValue = "10") int limit) {
+        return auditReportService.mostActiveCustomers(limit);
     }
 }

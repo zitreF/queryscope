@@ -6,4 +6,4 @@ dependencyResolutionManagement {
     }
 }
 
-include("agent", "demo-app")
+include("agent", "demo-app", "e2e")

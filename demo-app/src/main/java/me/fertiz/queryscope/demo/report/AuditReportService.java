@@ -4,7 +4,6 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Locale;
 
 @Service
 public class AuditReportService {
@@ -15,16 +14,17 @@ public class AuditReportService {
         this.jdbc = jdbc;
     }
 
-    public List<EventTypeCount> countMatching(String term) {
+    public List<CustomerActivity> mostActiveCustomers(int limit) {
         return jdbc.sql("""
-                        select type, count(*) as events
-                        from audit_events
-                        where lower(message) like ?
-                        group by type
+                        select c.name as customer, count(*) as events
+                        from audit_events e
+                        join customers c on c.email = e.actor_email
+                        group by c.name
                         order by events desc
+                        limit ?
                         """)
-                .param("%" + term.toLowerCase(Locale.ROOT) + "%")
-                .query(EventTypeCount.class)
+                .param(limit)
+                .query(CustomerActivity.class)
                 .list();
     }
 }

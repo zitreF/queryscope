@@ -18,8 +18,10 @@ public final class ConsoleReporter implements Consumer<RequestReport> {
     @Override
     public void accept(RequestReport report) {
         RequestTrace trace = report.trace();
-        LOGGER.log(System.Logger.Level.INFO, () -> String.format(Locale.ROOT, "%s %s -> %d, %d queries in %.1f ms",
-                trace.method(), trace.path(), trace.status(), trace.queries().size(), millis(trace.durationNanos())));
+        int queries = trace.queries().size();
+        LOGGER.log(System.Logger.Level.INFO, () -> String.format(Locale.ROOT, "%s %s -> %d, %d %s in %.1f ms",
+                trace.method(), trace.path(), trace.status(), queries, queries == 1 ? "query" : "queries",
+                millis(trace.durationNanos())));
         for (Finding finding : report.findings()) {
             LOGGER.log(System.Logger.Level.WARNING, () -> describe(finding));
         }

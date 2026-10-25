@@ -2,7 +2,7 @@ spring:
   application:
     name: queryscope-demo
   datasource:
-    url: jdbc:h2:mem:shop
+    url: jdbc:h2:mem:shop;OPTIMIZE_REUSE_RESULTS=0
   jpa:
     open-in-view: false
     hibernate:

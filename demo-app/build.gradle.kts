@@ -30,3 +30,7 @@ tasks.jar {
 tasks.bootJar {
     archiveFileName = "demo-app.jar"
 }
+
+configurations.consumable("demoJar") {
+    outgoing.artifact(tasks.bootJar)
+}

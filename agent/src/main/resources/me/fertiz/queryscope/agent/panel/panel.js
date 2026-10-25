@@ -175,7 +175,9 @@ function slowQueryCard(finding) {
     return el('div', {class: 'finding slow'},
         el('div', {class: 'finding-title'}, `Slow query: ${formatMs(finding.durationMs)}`),
         el('code', {class: 'sql'}, finding.sql),
-        el('div', {class: 'finding-meta'}, callSiteLine(finding.callSite), ` · query #${finding.queryIndex + 1}`));
+        el('div', {class: 'finding-meta'}, callSiteLine(finding.callSite), ` · query #${finding.queryIndex + 1}`),
+        el('div', {class: 'finding-meta'},
+            'Check the query plan (EXPLAIN) for full table scans, a missing index or a join on an unindexed column.'));
 }
 
 function callSiteLine(callSite) {

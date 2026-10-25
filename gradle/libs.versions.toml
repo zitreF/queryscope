@@ -2,6 +2,7 @@
 bytebuddy = "1.18.16"
 h2 = "2.4.240"
 hikaricp = "7.0.2"
+jackson = "3.1.7"
 junit = "6.0.3"
 servlet-api = "6.0.0"
 spring-boot = "4.1.2"
@@ -14,6 +15,7 @@ bytebuddy-agent = { module = "net.bytebuddy:byte-buddy-agent", version.ref = "by
 servlet-api = { module = "jakarta.servlet:jakarta.servlet-api", version.ref = "servlet-api" }
 h2 = { module = "com.h2database:h2", version.ref = "h2" }
 hikaricp = { module = "com.zaxxer:HikariCP", version.ref = "hikaricp" }
+jackson-databind = { module = "tools.jackson.core:jackson-databind", version.ref = "jackson" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }

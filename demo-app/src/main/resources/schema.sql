@@ -15,5 +15,6 @@ create table audit_events (
     id          bigint primary key,
     occurred_at timestamp    not null,
     type        varchar(30)  not null,
+    actor_email varchar(150) not null,
     message     varchar(255) not null
 );
