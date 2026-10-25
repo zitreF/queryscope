@@ -18,9 +18,6 @@ public final class ConsoleReporter implements Consumer<RequestReport> {
     @Override
     public void accept(RequestReport report) {
         RequestTrace trace = report.trace();
-        if (trace.queries().isEmpty()) {
-            return;
-        }
         LOGGER.log(System.Logger.Level.INFO, () -> String.format(Locale.ROOT, "%s %s -> %d, %d queries in %.1f ms",
                 trace.method(), trace.path(), trace.status(), trace.queries().size(), millis(trace.durationNanos())));
         for (Finding finding : report.findings()) {

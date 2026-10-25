@@ -17,9 +17,9 @@ class AgentConfigTest {
 
     @Test
     void readsCommaSeparatedOptions() {
-        AgentConfig config = AgentConfig.parse("nPlusOneThreshold=3, slowQueryMs=250");
+        AgentConfig config = AgentConfig.parse("port=9090, nPlusOneThreshold=3,slowQueryMs=250");
 
-        assertEquals(new AgentConfig(3, Duration.ofMillis(250)), config);
+        assertEquals(new AgentConfig(9090, 3, Duration.ofMillis(250)), config);
     }
 
     @Test
@@ -27,5 +27,6 @@ class AgentConfigTest {
         assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("slowQuery=250"));
         assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("slowQueryMs=0"));
         assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("nPlusOneThreshold=many"));
+        assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("port=70000"));
     }
 }

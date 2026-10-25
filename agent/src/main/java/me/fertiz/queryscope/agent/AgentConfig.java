@@ -3,9 +3,9 @@ package me.fertiz.queryscope.agent;
 import java.time.Duration;
 import java.util.regex.Pattern;
 
-public record AgentConfig(int nPlusOneThreshold, Duration slowQueryThreshold) {
+public record AgentConfig(int port, int nPlusOneThreshold, Duration slowQueryThreshold) {
 
-    public static final AgentConfig DEFAULTS = new AgentConfig(5, Duration.ofMillis(100));
+    public static final AgentConfig DEFAULTS = new AgentConfig(7070, 5, Duration.ofMillis(100));
 
     private static final Pattern POSITIVE_NUMBER = Pattern.compile("[1-9][0-9]{0,8}");
 
@@ -13,6 +13,7 @@ public record AgentConfig(int nPlusOneThreshold, Duration slowQueryThreshold) {
         if (arguments == null || arguments.isBlank()) {
             return DEFAULTS;
         }
+        int port = DEFAULTS.port();
         int nPlusOneThreshold = DEFAULTS.nPlusOneThreshold();
         Duration slowQueryThreshold = DEFAULTS.slowQueryThreshold();
         for (String option : arguments.split(",")) {
@@ -20,13 +21,22 @@ public record AgentConfig(int nPlusOneThreshold, Duration slowQueryThreshold) {
             String key = keyAndValue[0].trim();
             String value = keyAndValue.length == 2 ? keyAndValue[1].trim() : "";
             switch (key) {
+                case "port" -> port = portNumber(value);
                 case "nPlusOneThreshold" -> nPlusOneThreshold = positiveNumber(key, value);
                 case "slowQueryMs" -> slowQueryThreshold = Duration.ofMillis(positiveNumber(key, value));
-                default -> throw new IllegalArgumentException(
-                        "Unknown QueryScope option '" + key + "', known options are nPlusOneThreshold and slowQueryMs");
+                default -> throw new IllegalArgumentException("Unknown QueryScope option '" + key
+                        + "', known options are port, nPlusOneThreshold and slowQueryMs");
             }
         }
-        return new AgentConfig(nPlusOneThreshold, slowQueryThreshold);
+        return new AgentConfig(port, nPlusOneThreshold, slowQueryThreshold);
+    }
+
+    private static int portNumber(String value) {
+        int port = positiveNumber("port", value);
+        if (port > 65535) {
+            throw new IllegalArgumentException("QueryScope option port must be at most 65535, got " + port);
+        }
+        return port;
     }
 
     private static int positiveNumber(String key, String value) {
