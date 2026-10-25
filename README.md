@@ -6,6 +6,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/zitreF/queryscope/actions/workflows/build.yml"><img alt="Build" src="https://github.com/zitreF/queryscope/actions/workflows/build.yml/badge.svg"></a>
   <img alt="Java 17+" src="https://img.shields.io/badge/Java-17%2B-ED8B00?logo=openjdk&logoColor=white">
   <img alt="Spring Boot 3 and 4" src="https://img.shields.io/badge/Spring%20Boot-3%20%7C%204-6DB33F?logo=springboot&logoColor=white">
   <img alt="ByteBuddy 1.18" src="https://img.shields.io/badge/ByteBuddy-1.18-4B6BFB">
