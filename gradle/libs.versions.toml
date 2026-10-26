@@ -1,26 +1,14 @@
 [versions]
 bytebuddy = "1.18.16"
-h2 = "2.4.240"
-hikaricp = "7.0.2"
-jackson = "3.1.7"
-junit = "6.0.3"
 servlet-api = "6.0.0"
 spring-boot = "4.1.2"
-spring-dependency-management = "1.1.7"
 shadow = "9.6.1"
 
 [libraries]
 bytebuddy = { module = "net.bytebuddy:byte-buddy", version.ref = "bytebuddy" }
 bytebuddy-agent = { module = "net.bytebuddy:byte-buddy-agent", version.ref = "bytebuddy" }
 servlet-api = { module = "jakarta.servlet:jakarta.servlet-api", version.ref = "servlet-api" }
-h2 = { module = "com.h2database:h2", version.ref = "h2" }
-hikaricp = { module = "com.zaxxer:HikariCP", version.ref = "hikaricp" }
-jackson-databind = { module = "tools.jackson.core:jackson-databind", version.ref = "jackson" }
-junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
-junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
-junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }
 
 [plugins]
-spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }
-spring-dependency-management = { id = "io.spring.dependency-management", version.ref = "spring-dependency-management" }
 shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }

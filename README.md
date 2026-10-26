@@ -35,13 +35,13 @@ That is the whole setup. Open http://localhost:7070 and use the app.
 
 ## Quick start
 
-The repository has a demo app with a deliberate N+1, its fixed version and a slow report:
+The tests contain a small demo shop with a deliberate N+1, its fixed version and a slow report. `runDemo` builds the
+agent and starts the shop with it attached:
 
 ```bash
 git clone https://github.com/zitreF/queryscope.git
 cd queryscope
-./gradlew build
-java -javaagent:agent/build/libs/queryscope.jar -jar demo-app/build/libs/demo-app.jar
+./gradlew runDemo
 ```
 
 On Windows use `gradlew.bat`. Open the panel at http://localhost:7070 and call the endpoints:
@@ -88,7 +88,7 @@ customer.
 **1. Run the app with the agent and call the endpoint.**
 
 ```bash
-java -javaagent:agent/build/libs/queryscope.jar -jar demo-app/build/libs/demo-app.jar
+./gradlew runDemo
 curl http://localhost:8080/api/customers/naive
 ```
 
@@ -125,8 +125,8 @@ WARN  QueryScope : Slow query: 530.5 ms select c.name as customer, count(*) as e
 
 ## Attaching it to your own app
 
-Build the agent once with `./gradlew :agent:shadowJar`, which writes `agent/build/libs/queryscope.jar`. Then pass it
-to the JVM that runs your app.
+Build the agent once with `./gradlew shadowJar`, which writes `build/libs/queryscope.jar`. Then pass it to the JVM
+that runs your app.
 
 **Plain `java -jar`**
 
@@ -207,7 +207,7 @@ Each finding carries the normalized SQL, the call site and the indexes of the qu
 ```
 
 That makes it easy to guard against new N+1 queries: start the app with the agent in an end-to-end test, call the
-endpoint, and fail when its request has a finding. The [end-to-end test](e2e/src/test/java/me/fertiz/queryscope/e2e/QueryScopeEndToEndTest.java)
+endpoint, and fail when its request has a finding. The [end-to-end test](src/test/java/me/fertiz/queryscope/e2e/QueryScopeEndToEndTest.java)
 of this repository does exactly that for the demo.
 
 ## How it works
@@ -259,9 +259,11 @@ brings, and the agent is compiled for Java 17.
 ## Project layout
 
 ```
-agent/      the Java agent: instrumentation, analysis and the web panel
-demo-app/   Spring Boot + JPA + H2 app with an N+1, its fix and a slow report
-e2e/        starts the demo app with the real agent and checks what QueryScope reports
+src/main/java/me/fertiz/queryscope/agent/    the agent: instrument, trace, analysis, report and panel
+src/main/resources/.../agent/panel/          the web panel (HTML, CSS and JavaScript)
+src/test/java/me/fertiz/queryscope/agent/    unit tests
+src/test/java/me/fertiz/queryscope/demo/     demo shop on Spring Boot, JPA and H2 with an N+1, its fix and a slow report
+src/test/java/me/fertiz/queryscope/e2e/      starts the demo shop with the real agent and checks what QueryScope reports
 ```
 
 ## Building and testing
@@ -272,10 +274,12 @@ e2e/        starts the demo app with the real agent and checks what QueryScope r
 
 Java 25 toolchain, Gradle 9 with Kotlin DSL (wrapper included), Shadow for the agent jar. `build` runs every test:
 
-- `agent`: unit tests for the normalizer, the analyzer, the options, the JSON writer, the report store and the panel
-  server, including SSE and the `Host` check. `AgentInstrumentationTest` installs the agent into the test JVM with
-  ByteBuddyAgent and runs real queries through HikariCP and H2 inside simulated requests.
-- `demo-app`: the optimized endpoint returns exactly the same summaries as the naive one.
-- `e2e`: starts `java -javaagent:queryscope.jar -jar demo-app.jar` as a separate process on free ports and checks
-  through the panel API that the naive endpoint is an N+1 at `CustomerSummary.of`, the optimized one runs a single
-  query with no findings, the report is flagged as slow, and new requests arrive over SSE.
+- Unit tests for the normalizer, the analyzer, the options, the JSON writer, the report store and the panel server,
+  including SSE and the `Host` check.
+- `AgentInstrumentationTest` installs the agent into the test JVM with ByteBuddyAgent and runs real queries through
+  HikariCP and H2 inside simulated requests.
+- `CustomerServiceTest` checks that the demo's optimized endpoint returns exactly the same summaries as the naive one.
+- `QueryScopeEndToEndTest` starts the demo shop with `-javaagent:queryscope.jar` as a separate process on free ports
+  and checks through the panel API that the naive endpoint is an N+1 at `CustomerSummary.of`, the optimized one runs a
+  single query with no findings, the report is flagged as slow, and new requests arrive over SSE. The demo runs on
+  the test classpath without the agent's own classes, so only the shaded `queryscope.jar` is attached.

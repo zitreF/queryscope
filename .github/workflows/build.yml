@@ -25,5 +25,5 @@ jobs:
         with:
           name: test-reports
           path: |
-            */build/reports/tests
-            e2e/build/e2e-demo-app.log
+            build/reports/tests
+            build/e2e-demo-app.log

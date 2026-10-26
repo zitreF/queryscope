@@ -1,5 +1,6 @@
 package me.fertiz.queryscope.e2e;
 
+import me.fertiz.queryscope.demo.DemoApplication;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,7 +54,8 @@ class QueryScopeEndToEndTest {
         demoApp = new ProcessBuilder(
                 ProcessHandle.current().info().command().orElse("java"),
                 "-javaagent:" + System.getProperty("queryscope.agentJar") + "=port=" + panelPort,
-                "-jar", System.getProperty("queryscope.demoJar"),
+                "-cp", System.getProperty("queryscope.demoClasspath"),
+                DemoApplication.class.getName(),
                 "--server.port=" + appPort)
                 .redirectErrorStream(true)
                 .redirectOutput(log.toFile())

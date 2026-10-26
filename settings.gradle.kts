@@ -5,5 +5,3 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-
-include("agent", "demo-app", "e2e")
