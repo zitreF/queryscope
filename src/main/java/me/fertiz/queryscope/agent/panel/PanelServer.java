@@ -73,6 +73,7 @@ public final class PanelServer {
         } else if (!exchange.getRequestMethod().equals("GET")) {
             respond(exchange, 405, null, new byte[0]);
         } else {
+            exchange.getResponseHeaders().set("Cache-Control", "no-cache");
             respond(exchange, 200, asset.contentType(), asset.content());
         }
     }

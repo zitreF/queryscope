@@ -44,6 +44,7 @@ class PanelServerTest {
 
         assertEquals(200, page.statusCode());
         assertTrue(page.body().contains("<title>QueryScope</title>"));
+        assertEquals("no-cache", page.headers().firstValue("Cache-Control").orElseThrow());
         assertEquals(404, get("/missing.js").statusCode());
     }
 

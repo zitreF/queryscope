@@ -13,7 +13,7 @@
   <img alt="No dependencies in your app" src="https://img.shields.io/badge/dependencies%20in%20your%20app-none-2EA44F">
 </p>
 
-![QueryScope panel showing an N+1 query](docs/panel.png)
+![QueryScope Live tab with requests streaming in](docs/panel.png)
 
 ```bash
 java -javaagent:queryscope.jar -jar your-app.jar
@@ -27,7 +27,11 @@ That is the whole setup. Open http://localhost:7070 and use the app.
 - **N+1 detection.** The same SELECT repeated within one request is reported together with the line of your code
   that triggered it, for example `CustomerSummary.of(CustomerSummary.java:12)`.
 - **Slow queries.** Every query above a threshold you choose, 100 ms by default.
-- **Live request timeline.** The queries of each request on a time axis, streamed to the browser as they happen.
+- **Live tracking.** Keep the app running and use it: the Live tab draws every request on a moving time axis, with
+  one tick per SQL query, N+1 requests in red and slow ones in yellow. Below are live counters, a table of endpoints
+  by time spent in the database and the latest findings. A short notice appears whenever a new problem shows up.
+- **Request details.** The Requests tab shows each request's findings, its queries on a timeline and the full SQL with
+  syntax highlighting.
 - **Any data access code.** Works under Hibernate, Spring Data JPA, `JdbcClient`, `JdbcTemplate` or plain JDBC, with
   any driver and connection pool.
 - **Stays out of the way.** ByteBuddy is shaded, the panel listens on localhost only, its threads are daemons, and an
@@ -92,8 +96,12 @@ customer.
 curl http://localhost:8080/api/customers/naive
 ```
 
-**2. See what QueryScope found.** The request shows up in the panel with an `N+1 ×40` badge, the 40 repeated queries
-are red on its timeline, and the finding names the line that runs them. The same goes to the app's own log:
+**2. See what QueryScope found.** The request appears in the Live tab as a red bar, and the Requests tab shows
+it with an `N+1 ×40` badge, the 40 repeated queries red on its timeline, and the line that runs them:
+
+![QueryScope Requests tab with the N+1 request opened](docs/panel-n-plus-one.png)
+
+The same goes to the app's own log:
 
 ```
 INFO  QueryScope : GET /api/customers/naive -> 200, 41 queries in 46.9 ms
@@ -241,7 +249,8 @@ Statement / PreparedStatement.execute* ─time, SQL, call site─┘
   call site behind most of the repeats, and every query that takes at least `slowQueryMs` as slow.
 - **PanelServer** is the JDK's built-in `com.sun.net.httpserver`, bound to loopback. Every SSE client gets its own
   queue, so a slow browser never holds up an application thread, and requests with a foreign `Host` header are
-  rejected to stop DNS rebinding. The panel itself is plain HTML, CSS and JavaScript with no build step.
+  rejected to stop DNS rebinding. The panel itself is plain HTML, CSS and JavaScript with no build step and no
+  external requests: the live stream is drawn on a canvas, the SQL highlighter is a small tokenizer.
 
 ByteBuddy is shaded into `me.fertiz.queryscope.agent.shaded`, so it never clashes with the ByteBuddy that Hibernate
 brings, and the agent is compiled for Java 17.

@@ -3,36 +3,103 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
     <title>QueryScope</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='14' cy='14' r='9' fill='none' stroke='%237aa2ff' stroke-width='3'/%3E%3Cpath d='M21 21l7 7' stroke='%237aa2ff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='10' cy='10' r='6' fill='none' stroke='%238ab4f8' stroke-width='2.5'/%3E%3Cpath d='M14.5 14.5l6 6' stroke='%238ab4f8' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="panel.css">
 </head>
 <body>
-<header class="topbar">
-    <div class="brand">
-        <svg viewBox="0 0 32 32" aria-hidden="true">
-            <circle cx="14" cy="14" r="9"/>
-            <path d="M21 21l7 7"/>
-        </svg>
-        QueryScope
+<header class="app-bar">
+    <div class="app-bar-row">
+        <div class="product">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="10" cy="10" r="6"/>
+                <path d="M14.5 14.5l6 6"/>
+            </svg>
+            <span>QueryScope</span>
+        </div>
+        <div class="app-actions">
+            <span class="status" id="connection">Connecting</span>
+            <button type="button" class="text-button" id="pause">Pause</button>
+            <button type="button" class="text-button" id="clear">Clear</button>
+        </div>
     </div>
-    <div class="stats" id="stats"></div>
-    <div class="actions">
-        <label class="toggle">
-            <input type="checkbox" id="only-findings">
-            Only with findings
-        </label>
-        <button type="button" id="clear">Clear</button>
-        <span class="connection" id="connection">connecting</span>
-    </div>
+    <nav class="tabs" role="tablist" aria-label="Views">
+        <button type="button" class="tab" role="tab" data-tab="live" id="tab-live" aria-controls="view-live">Live</button>
+        <button type="button" class="tab" role="tab" data-tab="requests" id="tab-requests" aria-controls="view-requests">
+            Requests <span class="tab-count" id="request-count">0</span>
+        </button>
+    </nav>
 </header>
-<main class="layout">
-    <section class="requests" aria-label="Requests">
-        <ol id="request-list"></ol>
-        <p class="placeholder" id="no-requests">Waiting for HTTP requests that run SQL.</p>
+
+<main>
+    <section class="view" id="view-live" role="tabpanel" aria-labelledby="tab-live">
+        <div class="stats" id="kpis"></div>
+
+        <section class="panel">
+            <div class="panel-header">
+                <div>
+                    <h2>Live requests</h2>
+                    <p class="panel-hint">One bar per HTTP request, placed where it started. Each tick inside is one SQL query.</p>
+                </div>
+                <div class="segmented" id="window-chips" role="group" aria-label="Time window"></div>
+            </div>
+            <div class="stream" id="stream">
+                <canvas id="stream-canvas"></canvas>
+                <div class="stream-tooltip" id="stream-tooltip" hidden></div>
+                <p class="stream-empty" id="stream-empty">Use your app. Requests that run SQL appear here as they finish.</p>
+            </div>
+            <div class="legend">
+                <span class="ok">No findings</span>
+                <span class="slow">Slow query</span>
+                <span class="n-plus-one">N+1</span>
+            </div>
+        </section>
+
+        <div class="columns">
+            <section class="panel">
+                <div class="panel-header">
+                    <div>
+                        <h2>Endpoints</h2>
+                        <p class="panel-hint">Sorted by total time spent in the database</p>
+                    </div>
+                </div>
+                <div id="endpoints"></div>
+            </section>
+            <section class="panel">
+                <div class="panel-header">
+                    <div>
+                        <h2>Recent findings</h2>
+                        <p class="panel-hint">Select a row to open its request</p>
+                    </div>
+                </div>
+                <div id="findings-feed"></div>
+            </section>
+        </div>
     </section>
-    <section class="details" id="details" aria-label="Request details"></section>
+
+    <section class="view" id="view-requests" role="tabpanel" aria-labelledby="tab-requests" hidden>
+        <div class="master-detail">
+            <aside class="panel request-panel" aria-label="Requests">
+                <div class="list-toolbar">
+                    <label class="checkbox">
+                        <input type="checkbox" id="only-findings">
+                        Only requests with findings
+                    </label>
+                </div>
+                <ol class="request-list" id="request-list"></ol>
+                <p class="placeholder" id="no-requests">Waiting for HTTP requests that run SQL.</p>
+            </aside>
+            <article class="details" id="details"></article>
+        </div>
+    </section>
 </main>
+
+<div class="snackbar" id="snackbar" role="status" hidden>
+    <span class="snackbar-text" id="snackbar-text"></span>
+    <button type="button" class="snackbar-action" id="snackbar-action">View</button>
+</div>
+
 <script src="panel.js"></script>
 </body>
 </html>
