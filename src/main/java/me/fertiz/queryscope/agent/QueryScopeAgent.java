@@ -3,6 +3,7 @@ package me.fertiz.queryscope.agent;
 import me.fertiz.queryscope.agent.analysis.QueryAnalyzer;
 import me.fertiz.queryscope.agent.data.RequestReport;
 import me.fertiz.queryscope.agent.instrument.AgentInstaller;
+import me.fertiz.queryscope.agent.launch.LaunchCommand;
 import me.fertiz.queryscope.agent.panel.PanelServer;
 import me.fertiz.queryscope.agent.panel.ReportStore;
 import me.fertiz.queryscope.agent.report.ConsoleReporter;
@@ -33,6 +34,15 @@ public final class QueryScopeAgent {
         });
         AgentInstaller.install(instrumentation, config.entryMethods());
         startPanel(config.port(), store);
+        exitWithLauncher();
+    }
+
+    private static void exitWithLauncher() {
+        String launcherPid = System.getProperty(LaunchCommand.LAUNCHER_PID_PROPERTY);
+        if (launcherPid != null) {
+            ProcessHandle.of(Long.parseLong(launcherPid))
+                    .ifPresent(launcher -> launcher.onExit().thenRun(() -> System.exit(0)));
+        }
     }
 
     private static void startPanel(int port, ReportStore store) {

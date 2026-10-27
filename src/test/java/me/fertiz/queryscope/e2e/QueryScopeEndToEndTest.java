@@ -9,22 +9,19 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
-import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
+import static me.fertiz.queryscope.e2e.DemoProcess.get;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
@@ -32,7 +29,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class QueryScopeEndToEndTest {
 
-    private static final Duration STARTUP_TIMEOUT = Duration.ofMinutes(3);
     private static final Duration REPORT_TIMEOUT = Duration.ofSeconds(10);
     private static final List<String> ENDPOINTS =
             List.of("/api/customers/naive", "/api/customers/optimized", "/api/reports/customer-activity");
@@ -40,27 +36,21 @@ class QueryScopeEndToEndTest {
     private static final HttpClient CLIENT = HttpClient.newHttpClient();
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private static Process demoApp;
-    private static Path log;
+    private static DemoProcess demo;
     private static int appPort;
     private static int panelPort;
 
     @BeforeAll
     static void startDemoAppWithAgent() throws Exception {
-        appPort = freePort();
-        panelPort = freePort();
-        log = Path.of("build", "e2e-demo-app.log");
-        Files.createDirectories(log.getParent());
-        demoApp = new ProcessBuilder(
-                ProcessHandle.current().info().command().orElse("java"),
-                "-javaagent:" + System.getProperty("queryscope.agentJar") + "=port=" + panelPort,
-                "-cp", System.getProperty("queryscope.demoClasspath"),
-                DemoApplication.class.getName(),
-                "--server.port=" + appPort)
-                .redirectErrorStream(true)
-                .redirectOutput(log.toFile())
-                .start();
-        waitUntilAppResponds();
+        appPort = DemoProcess.freePort();
+        panelPort = DemoProcess.freePort();
+        demo = DemoProcess.start(List.of(
+                        DemoProcess.JAVA,
+                        "-javaagent:" + DemoProcess.AGENT_JAR + "=port=" + panelPort,
+                        "-cp", DemoProcess.DEMO_CLASSPATH,
+                        DemoApplication.class.getName(),
+                        "--server.port=" + appPort),
+                Path.of("build", "e2e-demo-app.log"), appPort);
         for (String endpoint : ENDPOINTS) {
             get(appPort, endpoint);
         }
@@ -68,10 +58,7 @@ class QueryScopeEndToEndTest {
 
     @AfterAll
     static void stopDemoApp() throws InterruptedException {
-        demoApp.destroy();
-        if (!demoApp.waitFor(10, TimeUnit.SECONDS)) {
-            demoApp.destroyForcibly();
-        }
+        demo.close();
     }
 
     @BeforeEach
@@ -82,7 +69,7 @@ class QueryScopeEndToEndTest {
 
     @Test
     void agentInstrumentsTheAppWithoutErrors() throws IOException {
-        String output = Files.readString(log);
+        String output = demo.output();
 
         assertTrue(output.contains("QueryScope panel is running at http://localhost:" + panelPort), output);
         assertFalse(output.contains("Could not instrument"), output);
@@ -146,11 +133,10 @@ class QueryScopeEndToEndTest {
         assertTrue(page.body().contains("<title>QueryScope</title>"));
     }
 
-    private static JsonNode requestAndReport(String path) throws Exception {
-        assertEquals(200, get(appPort, path).statusCode());
+    static JsonNode reportFor(int panelPort, String path) throws Exception {
         Instant deadline = Instant.now().plus(REPORT_TIMEOUT);
         while (Instant.now().isBefore(deadline)) {
-            Optional<JsonNode> report = storedReport(path);
+            Optional<JsonNode> report = storedReport(panelPort, path);
             if (report.isPresent()) {
                 return report.get();
             }
@@ -159,7 +145,12 @@ class QueryScopeEndToEndTest {
         throw new AssertionError("The panel never reported " + path);
     }
 
-    private static Optional<JsonNode> storedReport(String path) throws Exception {
+    private static JsonNode requestAndReport(String path) throws Exception {
+        assertEquals(200, get(appPort, path).statusCode());
+        return reportFor(panelPort, path);
+    }
+
+    private static Optional<JsonNode> storedReport(int panelPort, String path) throws Exception {
         JsonNode reports = JSON.readTree(get(panelPort, "/api/requests").body());
         for (int index = 0; index < reports.size(); index++) {
             if (reports.get(index).path("path").asString().equals(path)) {
@@ -174,39 +165,7 @@ class QueryScopeEndToEndTest {
         return array.get(0);
     }
 
-    private static void waitUntilAppResponds() throws Exception {
-        Instant deadline = Instant.now().plus(STARTUP_TIMEOUT);
-        while (Instant.now().isBefore(deadline)) {
-            if (!demoApp.isAlive()) {
-                throw new AssertionError("Demo app exited during startup:\n" + logTail());
-            }
-            try {
-                get(appPort, "/api/customers/optimized");
-                return;
-            } catch (IOException notReadyYet) {
-                Thread.sleep(500);
-            }
-        }
-        throw new AssertionError("Demo app did not start within " + STARTUP_TIMEOUT + ":\n" + logTail());
-    }
-
-    private static String logTail() throws IOException {
-        List<String> lines = new ArrayList<>(Files.readAllLines(log));
-        return String.join("\n", lines.subList(Math.max(0, lines.size() - 40), lines.size()));
-    }
-
-    private static HttpResponse<String> get(int port, String path) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path)).build();
-        return CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
-    }
-
     private static URI panel(String path) {
         return URI.create("http://localhost:" + panelPort + path);
-    }
-
-    private static int freePort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
     }
 }

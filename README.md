@@ -16,10 +16,11 @@
 ![QueryScope Live tab with requests streaming in](docs/panel.png)
 
 ```bash
-java -javaagent:queryscope.jar -jar your-app.jar
+java -jar queryscope.jar your-app.jar
 ```
 
-That is the whole setup. Open http://localhost:7070 and use the app.
+That is the whole setup: QueryScope starts your app with the agent attached. Open http://localhost:7070 and use the
+app, and stop both with Ctrl+C.
 
 ## Features
 
@@ -139,10 +140,21 @@ WARN  QueryScope : Slow query: 530.5 ms select c.name as customer, count(*) as e
 
 ## Attaching it to your own app
 
-Build the agent once with `./gradlew shadowJar`, which writes `build/libs/queryscope.jar`. Then pass it to the JVM
-that runs your app.
+Build the agent once with `./gradlew shadowJar`, which writes `build/libs/queryscope.jar`.
 
-**Plain `java -jar`**
+**Let QueryScope start it**
+
+```bash
+java -jar queryscope.jar your-app.jar
+java -jar queryscope.jar --port=9090 --slowQueryMs=250 your-app.jar --server.port=8081
+java -Xmx1g -Dspring.profiles.active=local -jar queryscope.jar -cp "lib/*" com.acme.Main
+```
+
+Options before the jar go to QueryScope, arguments after it go to the app, and JVM options of the `java` command
+are passed on to the app. Ctrl+C stops both, and if the launcher is killed the app shuts itself down instead of
+holding on to its port. `java -jar queryscope.jar --help` lists the options.
+
+**Attach it yourself**: pass the jar to the JVM that runs your app.
 
 ```bash
 java -javaagent:/path/to/queryscope.jar -jar your-app.jar
@@ -167,7 +179,8 @@ tasks.bootRun {
 
 ### Options
 
-Options go after the jar path, separated by commas:
+With `-javaagent` the options go after the jar path, separated by commas. The launcher takes the same options as
+`--name=value` arguments:
 
 ```bash
 java -javaagent:/path/to/queryscope.jar=port=9090,nPlusOneThreshold=3,slowQueryMs=250,entry=com.acme.ImportJob#run -jar your-app.jar

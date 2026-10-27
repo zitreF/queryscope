@@ -11,7 +11,9 @@ final class CallSites {
             "org.springframework.", "org.hibernate.", "org.apache.", "org.eclipse.", "org.jboss.",
             "com.zaxxer.", "org.h2.", "org.postgresql.", "com.mysql.", "org.mariadb.", "oracle.",
             "com.microsoft.sqlserver.", "com.fasterxml.", "tools.jackson.", "io.micrometer.",
-            "me.fertiz.queryscope.agent.");
+            "org.flywaydb.", "liquibase.", "org.jooq.", "io.netty.", "reactor.", "kotlin.", "kotlinx.", "scala.",
+            "groovy.", "org.codehaus.groovy.", "org.slf4j.", "ch.qos.logback.", "org.aspectj.",
+            "org.junit.", "org.gradle.", "worker.org.gradle.", "me.fertiz.queryscope.agent.");
 
     private CallSites() {
     }

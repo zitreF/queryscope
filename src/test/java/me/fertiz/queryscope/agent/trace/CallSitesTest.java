@@ -28,5 +28,6 @@ class CallSitesTest {
         assertFalse(CallSites.isApplicationCode("com.acme.shop.OrderService$$SpringCGLIB$$0"));
         assertFalse(CallSites.isApplicationCode("com.acme.shop.Customer$HibernateProxy$x1y2"));
         assertFalse(CallSites.isApplicationCode("me.fertiz.queryscope.agent.trace.RequestTracer"));
+        assertFalse(CallSites.isApplicationCode("org.flywaydb.core.internal.jdbc.JdbcTemplate"));
     }
 }
