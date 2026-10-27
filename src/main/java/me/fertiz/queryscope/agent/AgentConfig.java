@@ -13,10 +13,13 @@ public record AgentConfig(
         Duration slowQueryThreshold,
         int largeResultRows,
         int maxQueries,
-        List<String> entryMethods
+        List<String> entryMethods,
+        boolean openPanel,
+        boolean printSummary
 ) {
 
-    public static final AgentConfig DEFAULTS = new AgentConfig(7070, 5, Duration.ofMillis(100), 500, 30, List.of());
+    public static final AgentConfig DEFAULTS =
+            new AgentConfig(7070, 5, Duration.ofMillis(100), 500, 30, List.of(), false, true);
 
     private static final Pattern POSITIVE_NUMBER = Pattern.compile("[1-9][0-9]{0,8}");
     private static final Pattern ENTRY_METHOD = Pattern.compile("[\\p{L}_$][\\p{L}\\p{N}_$.]*#[\\p{L}_$][\\p{L}\\p{N}_$]*");
@@ -35,6 +38,8 @@ public record AgentConfig(
         int largeResultRows = DEFAULTS.largeResultRows();
         int maxQueries = DEFAULTS.maxQueries();
         List<String> entryMethods = new ArrayList<>();
+        boolean openPanel = DEFAULTS.openPanel();
+        boolean printSummary = DEFAULTS.printSummary();
         for (String option : arguments.split(",")) {
             String[] keyAndValue = option.split("=", 2);
             String key = keyAndValue[0].trim();
@@ -46,11 +51,15 @@ public record AgentConfig(
                 case "largeResultRows" -> largeResultRows = positiveNumber(key, value);
                 case "maxQueries" -> maxQueries = positiveNumber(key, value);
                 case "entry" -> entryMethods.add(entryMethod(value));
+                case "open" -> openPanel = flag(key, value);
+                case "summary" -> printSummary = flag(key, value);
                 default -> throw new IllegalArgumentException("Unknown QueryScope option '" + key
-                        + "', known options are port, nPlusOneThreshold, slowQueryMs, largeResultRows, maxQueries and entry");
+                        + "', known options are port, nPlusOneThreshold, slowQueryMs, largeResultRows, maxQueries,"
+                        + " entry, open and summary");
             }
         }
-        return new AgentConfig(port, nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries, entryMethods);
+        return new AgentConfig(port, nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries, entryMethods,
+                openPanel, printSummary);
     }
 
     public Thresholds thresholds() {
@@ -63,6 +72,15 @@ public record AgentConfig(
                     "QueryScope option entry needs a class and a method like com.acme.ImportJob#run, got '" + value + "'");
         }
         return value;
+    }
+
+    private static boolean flag(String key, String value) {
+        return switch (value) {
+            case "", "true" -> true;
+            case "false" -> false;
+            default -> throw new IllegalArgumentException(
+                    "QueryScope option " + key + " needs true or false, got '" + value + "'");
+        };
     }
 
     private static int portNumber(String value) {

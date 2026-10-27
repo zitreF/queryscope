@@ -19,8 +19,8 @@
 java -jar queryscope.jar your-app.jar
 ```
 
-That is the whole setup: QueryScope starts your app with the agent attached. Open http://localhost:7070 and use the
-app, and stop both with Ctrl+C.
+That is the whole setup: QueryScope starts your app with the agent attached. Open http://localhost:7070, or add
+`--open` and QueryScope opens it for you, then use the app. Ctrl+C stops both and prints a summary of the session.
 
 ## Features
 
@@ -34,6 +34,9 @@ app, and stop both with Ctrl+C.
 - **Live tracking.** Keep the app running and use it: the Live tab draws every request on a moving time axis, with
   one tick per SQL query, N+1 requests in red and slow ones in yellow. Below are live counters, a table of endpoints
   by time spent in the database and the latest findings. A short notice appears whenever a new problem shows up.
+- **Session summary.** When the app stops, QueryScope prints every endpoint and task with its calls, queries per
+  call, average time and time in the database, followed by the findings that came up most often. IDs in paths are
+  folded, so `/api/customers/7` and `/api/customers/8` count as `GET /api/customers/{id}`.
 - **Request details.** The Requests tab shows each request's findings, its queries on a timeline and the full SQL with
   syntax highlighting.
 - **Any data access code.** Works under Hibernate, Spring Data JPA, `JdbcClient`, `JdbcTemplate` or plain JDBC, with
@@ -152,7 +155,7 @@ Build the agent once with `./gradlew shadowJar`, which writes `build/libs/querys
 
 ```bash
 java -jar queryscope.jar your-app.jar
-java -jar queryscope.jar --port=9090 --slowQueryMs=250 your-app.jar --server.port=8081
+java -jar queryscope.jar --open --port=9090 --slowQueryMs=250 your-app.jar --server.port=8081
 java -Xmx1g -Dspring.profiles.active=local -jar queryscope.jar -cp "lib/*" com.acme.Main
 ```
 
@@ -200,9 +203,12 @@ java -javaagent:/path/to/queryscope.jar=port=9090,nPlusOneThreshold=3,slowQueryM
 | `largeResultRows`   | `500`   | Queries returning at least this many rows are reported       |
 | `maxQueries`        | `30`    | Requests or tasks running at least this many queries         |
 | `entry`             | none    | `Class#method` whose call becomes one task, can be repeated  |
+| `open`              | `false` | Opens the panel in the default browser once it is running    |
+| `summary`           | `true`  | Prints the session summary when the JVM stops                |
 
-An unknown option or a value that is not a positive number stops the JVM at startup with a message that names it. If
-the port is taken, the panel is skipped and findings still go to the log.
+`open` and `summary` work without a value too, so `--open` and `open` mean `open=true`. An unknown option or an
+invalid value stops the JVM at startup with a message that names it. If the port is taken, the panel is skipped and
+findings still go to the log.
 
 QueryScope needs Java 17 or newer and works with any Java app that talks to its database through JDBC:
 
@@ -213,8 +219,8 @@ QueryScope needs Java 17 or newer and works with any Java app that talks to its 
   named after the application method that ran the queries, such as `ImportJob.run`. With `entry=` a whole method
   call is one task, however many connections it uses.
 
-The demo and the end-to-end test run Spring Boot 4.1 on Tomcat with HikariCP and H2, and `javax.servlet` and tasks are
-covered by in-process tests. QueryScope is a development tool that keeps the SQL of the last 200 requests and tasks
+The end-to-end tests run the demo on Spring Boot 4.1 with Tomcat, HikariCP and H2, and a plain `main` program on bare
+JDBC, and `javax.servlet` is covered by in-process tests. QueryScope is a development tool that keeps the SQL of the last 200 requests and tasks
 in memory, together with their bound parameters (strings cut at 64 characters, binary values shown as their size),
 so don't attach it in production.
 
@@ -259,17 +265,18 @@ of this repository does exactly that for the demo.
 ## How it works
 
 ```
-HTTP request ─> FilterChain.doFilter ─opens─> request trace (per thread)
-                                                     ▲
-Connection.prepareStatement ─SQL─> StatementSqlRegistry
-Statement / PreparedStatement.execute* ─time, SQL, call site─┘
-                                                     │ request ends
-                                                     ▼
-                             QueryAnalyzer + SqlNormalizer ─> N+1 and slow query findings
-                                                     │
-                              ┌──────────────────────┴──────────────────────┐
-                              ▼                                             ▼
-                    ConsoleReporter (app log)              ReportStore ─> PanelServer ─SSE─> browser
+HTTP request ─> FilterChain.doFilter ─opens─> unit of work (one per thread)
+                                                   ▲
+Connection.prepareStatement, setXxx ───────────────┤ SQL and bound parameters
+Statement / PreparedStatement.execute* ────────────┤ time and call site
+ResultSet.next ────────────────────────────────────┤ rows
+                                                   │ request or task ends
+                                                   ▼
+                               QueryAnalyzer + SqlNormalizer ─> findings
+                                                   │
+              ┌────────────────────────────────────┼────────────────────────────────────┐
+              ▼                                    ▼                                    ▼
+  ConsoleReporter (app log)    ReportStore ─> PanelServer ─SSE─> browser    SessionSummary (on exit)
 ```
 
 - **AgentInstaller** is a table of hooks: `FilterChain.doFilter` and `HttpServlet.service` in both servlet namespaces,
@@ -295,6 +302,9 @@ Statement / PreparedStatement.execute* ─time, SQL, call site─┘
   parameters run twice is a duplicate, unless it is already part of an N+1. Every query that takes at least
   `slowQueryMs` is slow, every query returning `largeResultRows` rows is a large result, and a unit of work with
   `maxQueries` queries or more gets a finding of its own with the share of its time spent in the database.
+- **SessionSummary** collects every report by endpoint, with numeric and UUID path segments folded into `{id}` and
+  `{uuid}`, and prints its table from a JVM shutdown hook, so it also appears when a launcher-started app is stopped.
+  Endpoints and distinct findings are capped, so a long session never grows without bound.
 - **PanelServer** is the JDK's built-in `com.sun.net.httpserver`, bound to loopback. Every SSE client gets its own
   queue, so a slow browser never holds up an application thread, and requests with a foreign `Host` header are
   rejected to stop DNS rebinding. The panel itself is plain HTML, CSS and JavaScript with no build step and no
@@ -322,7 +332,8 @@ src/main/java/me/fertiz/queryscope/agent/    the agent: instrument, trace, analy
 src/main/resources/.../agent/panel/          the web panel (HTML, CSS and JavaScript)
 src/test/java/me/fertiz/queryscope/agent/    unit tests
 src/test/java/me/fertiz/queryscope/demo/     demo shop on Spring Boot, JPA and H2 with an N+1, its fix and a slow report
-src/test/java/me/fertiz/queryscope/e2e/      starts the demo shop with the real agent and checks what QueryScope reports
+src/test/java/me/fertiz/queryscope/plain/    a plain Java program on bare JDBC, without Spring
+src/test/java/me/fertiz/queryscope/e2e/      runs the demo, the launcher and the plain program with the real agent
 ```
 
 ## Building and testing
@@ -333,13 +344,18 @@ src/test/java/me/fertiz/queryscope/e2e/      starts the demo shop with the real 
 
 Java 25 toolchain, Gradle 9 with Kotlin DSL (wrapper included), Shadow for the agent jar. `build` runs every test:
 
-- Unit tests for the normalizer, the analyzer, the options, the JSON writer, the report store and the panel server,
-  including SSE and the `Host` check.
+- Unit tests for the normalizer, the analyzer, the options, the launcher's command line, the parameter formatting, the
+  session summary, the JSON writer, the report store and the panel server, including SSE and the `Host` check.
 - `AgentInstrumentationTest` installs the agent into the test JVM with ByteBuddyAgent and runs real queries through
   HikariCP and H2 inside simulated `jakarta.servlet` and `javax.servlet` requests, outside any request, and inside an
   `entry=` method.
 - `CustomerServiceTest` checks that the demo's optimized endpoint returns exactly the same summaries as the naive one.
 - `QueryScopeEndToEndTest` starts the demo shop with `-javaagent:queryscope.jar` as a separate process on free ports
   and checks through the panel API that the naive endpoint is an N+1 at `CustomerSummary.of`, the optimized one runs a
-  single query with no findings, the report is flagged as slow, and new requests arrive over SSE. The demo runs on
-  the test classpath without the agent's own classes, so only the shaded `queryscope.jar` is attached.
+  single query with no findings, the report is flagged as slow, duplicates, unbatched writes and large results are
+  found, and new requests arrive over SSE. The demo runs on the test classpath without the agent's own classes, so
+  only the shaded `queryscope.jar` is attached.
+- `LauncherEndToEndTest` starts the demo through `java -jar queryscope.jar` and checks that killing the launcher takes
+  the app down with it.
+- `PlainJavaEndToEndTest` runs a plain `main` program on H2 with the agent and checks the N+1 in its task and the
+  session summary printed when it exits.

@@ -6,7 +6,9 @@ import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AgentConfigTest {
 
@@ -21,7 +23,16 @@ class AgentConfigTest {
         AgentConfig config = AgentConfig.parse(
                 "port=9090, nPlusOneThreshold=3,slowQueryMs=250,largeResultRows=1000,maxQueries=50");
 
-        assertEquals(new AgentConfig(9090, 3, Duration.ofMillis(250), 1000, 50, List.of()), config);
+        assertEquals(new AgentConfig(9090, 3, Duration.ofMillis(250), 1000, 50, List.of(), false, true), config);
+    }
+
+    @Test
+    void readsFlagsWithOrWithoutValue() {
+        assertTrue(AgentConfig.parse("open").openPanel());
+        assertTrue(AgentConfig.parse("open=true").openPanel());
+        assertFalse(AgentConfig.parse("summary=false").printSummary());
+        assertTrue(AgentConfig.DEFAULTS.printSummary());
+        assertFalse(AgentConfig.DEFAULTS.openPanel());
     }
 
     @Test
@@ -38,5 +49,6 @@ class AgentConfigTest {
         assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("nPlusOneThreshold=many"));
         assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("port=70000"));
         assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("entry=com.acme.ImportJob.run"));
+        assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("summary=no"));
     }
 }

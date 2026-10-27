@@ -20,8 +20,12 @@ public final class QueryScopeLauncher {
 
             Options:
               --port=7070                 port of the panel on localhost
-              --nPlusOneThreshold=5       runs of the same SELECT in one request that make an N+1
+              --open                      opens the panel in the browser once it is running
+              --summary=false             skips the session summary printed when the application stops
+              --nPlusOneThreshold=5       runs of the same SELECT, or write, in one request that are reported
               --slowQueryMs=100           queries at least this slow are reported
+              --largeResultRows=500       queries returning at least this many rows are reported
+              --maxQueries=30             requests running at least this many queries are reported
               --entry=com.acme.Job#run    method whose call becomes one task, can be repeated
 
             JVM options of this java command, such as -Xmx1g or -Dspring.profiles.active=local, are

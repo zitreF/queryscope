@@ -1,0 +1,116 @@
+package me.fertiz.queryscope.agent.report;
+
+import me.fertiz.queryscope.agent.data.Finding;
+import me.fertiz.queryscope.agent.data.NPlusOne;
+import me.fertiz.queryscope.agent.data.QueryExecution;
+import me.fertiz.queryscope.agent.data.RequestReport;
+import me.fertiz.queryscope.agent.data.RequestTrace;
+import me.fertiz.queryscope.agent.data.UnitKind;
+import org.junit.jupiter.api.Test;
+
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.stream.IntStream;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class SessionSummaryTest {
+
+    private static final Instant STARTED_AT = Instant.parse("2026-10-27T09:00:00Z");
+    private static final String MAPPER = "com.acme.OrderMapper.toDto(OrderMapper.java:12)";
+    private static final NPlusOne ORDERS = new NPlusOne("select * from orders where customer_id = ?", MAPPER,
+            List.of(0, 1, 2, 3, 4), 5_000_000);
+
+    private final TestClock clock = new TestClock();
+    private final SessionSummary summary = new SessionSummary(clock);
+
+    @Test
+    void printsNothingWhenNoQueryRan() {
+        assertEquals("", print());
+    }
+
+    @Test
+    void groupsRequestsByEndpointWithIdentifiersReplaced() {
+        summary.accept(http("/api/customers/1/orders", 3, List.of()));
+        summary.accept(http("/api/customers/2/orders?page=1", 5, List.of()));
+        summary.accept(http("/api/orders/5f0c8a3e-9d1b-4c47-8a55-0f6b2a7d9e11", 1, List.of()));
+        summary.accept(task("DigestJob.run", 2));
+        clock.advance(Duration.ofSeconds(125));
+
+        String output = print();
+
+        assertTrue(output.contains("QueryScope session summary: 2 min 5 s, 4 requests and tasks, 11 queries"), output);
+        assertTrue(output.matches("(?s).*GET /api/customers/\\{id}/orders +2 +4\\.0 .*"), output);
+        assertTrue(output.contains("GET /api/orders/{uuid}"), output);
+        assertTrue(output.contains("Task DigestJob.run"), output);
+        assertTrue(output.contains("No findings."), output);
+    }
+
+    @Test
+    void countsTheSameFindingOnceForEveryRequestItAppearsIn() {
+        summary.accept(http("/api/customers/1/orders", 6, List.of(ORDERS)));
+        summary.accept(http("/api/customers/2/orders", 6, List.of(ORDERS)));
+        summary.accept(http("/api/customers/3/orders", 6, List.of(ORDERS)));
+
+        String output = print();
+
+        assertTrue(output.contains("3 x  N+1: 5 x select * from orders where customer_id = ? at " + MAPPER
+                + "  (GET /api/customers/{id}/orders)"), output);
+        assertTrue(output.matches("(?s).*GET /api/customers/\\{id}/orders +3 +6\\.0 .* N\\+1\\R.*"), output);
+    }
+
+    private String print() {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        summary.print(new PrintStream(bytes, true, StandardCharsets.UTF_8));
+        return bytes.toString(StandardCharsets.UTF_8);
+    }
+
+    private static RequestReport http(String path, int queries, List<Finding> findings) {
+        return new RequestReport(new RequestTrace(1, UnitKind.HTTP, "GET", path, 200, STARTED_AT, 10_000_000,
+                queries(queries)), findings);
+    }
+
+    private static RequestReport task(String name, int queries) {
+        return new RequestReport(new RequestTrace(2, UnitKind.TASK, null, name, 0, STARTED_AT, 4_000_000,
+                queries(queries)), List.of());
+    }
+
+    private static List<QueryExecution> queries(int count) {
+        return IntStream.range(0, count)
+                .mapToObj(index -> new QueryExecution("select * from orders where customer_id = " + index, "",
+                        index * 1_000_000L, 1_000_000, 1, MAPPER, false))
+                .toList();
+    }
+
+    private static final class TestClock extends Clock {
+
+        private Instant now = STARTED_AT;
+
+        void advance(Duration duration) {
+            now = now.plus(duration);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
+    }
+}

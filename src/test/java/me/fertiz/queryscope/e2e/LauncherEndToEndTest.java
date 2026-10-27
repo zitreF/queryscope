@@ -35,6 +35,8 @@ class LauncherEndToEndTest {
             launcher.process().destroy();
 
             assertTrue(stopsResponding(appPort), "The app kept running after the launcher was gone");
+            assertTrue(printsSummary(launcher), launcher.output());
+            assertTrue(launcher.output().matches("(?s).*GET /api/customers/naive +1 +41\\.0 .*"), launcher.output());
         }
     }
 
@@ -42,6 +44,17 @@ class LauncherEndToEndTest {
         Instant deadline = Instant.now().plus(SHUTDOWN_TIMEOUT);
         while (Instant.now().isBefore(deadline)) {
             if (!DemoProcess.responds(port)) {
+                return true;
+            }
+            Thread.sleep(500);
+        }
+        return false;
+    }
+
+    private static boolean printsSummary(DemoProcess launcher) throws Exception {
+        Instant deadline = Instant.now().plus(SHUTDOWN_TIMEOUT);
+        while (Instant.now().isBefore(deadline)) {
+            if (launcher.output().contains("Findings, most frequent first")) {
                 return true;
             }
             Thread.sleep(500);
