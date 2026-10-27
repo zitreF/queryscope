@@ -9,6 +9,8 @@ import net.bytebuddy.utility.JavaModule;
 
 import java.lang.instrument.Instrumentation;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,6 +19,7 @@ import static net.bytebuddy.matcher.ElementMatchers.hasSuperType;
 import static net.bytebuddy.matcher.ElementMatchers.is;
 import static net.bytebuddy.matcher.ElementMatchers.isAbstract;
 import static net.bytebuddy.matcher.ElementMatchers.isInterface;
+import static net.bytebuddy.matcher.ElementMatchers.isOverriddenFrom;
 import static net.bytebuddy.matcher.ElementMatchers.isSynthetic;
 import static net.bytebuddy.matcher.ElementMatchers.nameStartsWith;
 import static net.bytebuddy.matcher.ElementMatchers.named;
@@ -76,7 +79,18 @@ public final class AgentInstaller {
                         ExecuteSqlAdvice.class),
                 new Hook(implementing(Statement.class),
                         namedOneOf(EXECUTE_METHODS).or(namedOneOf(BATCH_METHODS)).and(takesArguments(0)),
-                        ExecutePreparedAdvice.class)));
+                        ExecutePreparedAdvice.class),
+                new Hook(implementing(PreparedStatement.class),
+                        nameStartsWith("set").and(takesArgument(0, int.class))
+                                .and(takesArguments(2).or(takesArguments(3)))
+                                .and(isOverriddenFrom(PreparedStatement.class)),
+                        ParameterAdvice.class),
+                new Hook(implementing(PreparedStatement.class),
+                        named("clearParameters").and(takesArguments(0)),
+                        ClearParametersAdvice.class),
+                new Hook(implementing(ResultSet.class),
+                        named("next").and(takesArguments(0)),
+                        RowAdvice.class)));
         for (String entryMethod : entryMethods) {
             String[] typeAndMethod = entryMethod.split("#", 2);
             hooks.add(new Hook(named(typeAndMethod[0]), named(typeAndMethod[1]), EntryAdvice.class));

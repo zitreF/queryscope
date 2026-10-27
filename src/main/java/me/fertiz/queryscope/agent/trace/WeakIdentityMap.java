@@ -6,29 +6,29 @@ import java.lang.ref.WeakReference;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-final class StatementSqlRegistry {
+final class WeakIdentityMap<V> {
 
-    private final Map<IdentityKey, String> sqlByStatement = new ConcurrentHashMap<>();
+    private final Map<IdentityKey, V> values = new ConcurrentHashMap<>();
     private final ReferenceQueue<Object> collected = new ReferenceQueue<>();
 
-    void remember(Object statement, String sql) {
+    void put(Object key, V value) {
         removeCollected();
-        sqlByStatement.put(new IdentityKey(statement, collected), sql);
+        values.put(new IdentityKey(key, collected), value);
     }
 
-    String sqlOf(Object statement) {
-        return sqlByStatement.get(new IdentityKey(statement, null));
+    V get(Object key) {
+        return values.get(new IdentityKey(key, null));
     }
 
     int size() {
         removeCollected();
-        return sqlByStatement.size();
+        return values.size();
     }
 
     private void removeCollected() {
         Reference<?> key;
         while ((key = collected.poll()) != null) {
-            sqlByStatement.remove(key);
+            values.remove(key);
         }
     }
 
@@ -36,9 +36,9 @@ final class StatementSqlRegistry {
 
         private final int hash;
 
-        private IdentityKey(Object statement, ReferenceQueue<Object> queue) {
-            super(statement, queue);
-            this.hash = System.identityHashCode(statement);
+        private IdentityKey(Object key, ReferenceQueue<Object> queue) {
+            super(key, queue);
+            this.hash = System.identityHashCode(key);
         }
 
         @Override
@@ -54,8 +54,8 @@ final class StatementSqlRegistry {
             if (!(other instanceof IdentityKey key)) {
                 return false;
             }
-            Object statement = get();
-            return statement != null && statement == key.get();
+            Object referent = get();
+            return referent != null && referent == key.get();
         }
     }
 }

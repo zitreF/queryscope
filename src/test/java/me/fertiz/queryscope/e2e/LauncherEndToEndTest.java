@@ -30,7 +30,7 @@ class LauncherEndToEndTest {
         try (DemoProcess launcher = DemoProcess.start(command, Path.of("build", "e2e-launcher.log"), appPort)) {
             assertEquals(200, get(appPort, "/api/customers/naive").statusCode());
             JsonNode report = QueryScopeEndToEndTest.reportFor(panelPort, "/api/customers/naive");
-            assertEquals("nPlusOne", report.path("findings").get(0).path("type").asString());
+            assertTrue(report.path("findings").toString().contains("\"type\":\"nPlusOne\""), report.toString());
 
             launcher.process().destroy();
 

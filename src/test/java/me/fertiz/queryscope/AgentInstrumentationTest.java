@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
@@ -83,6 +84,38 @@ class AgentInstrumentationTest {
         assertEquals("/books", trace.path());
         assertEquals(200, trace.status());
         assertEquals(List.of(BY_ID, BY_ID, BY_ID), trace.queries().stream().map(QueryExecution::sql).toList());
+    }
+
+    @Test
+    void capturesBoundParametersAndCountsRowsOnceThroughPoolProxies() {
+        handle(request(DispatcherType.REQUEST, "/books"), () -> {
+            try (Connection connection = dataSource.getConnection();
+                 PreparedStatement statement = connection.prepareStatement(
+                         "select title from books where id > ? and title <> ?")) {
+                statement.setInt(1, 0);
+                statement.setString(2, "Missing");
+                try (ResultSet rows = statement.executeQuery()) {
+                    while (rows.next()) {
+                        rows.getString(1);
+                    }
+                }
+            }
+        });
+
+        QueryExecution query = singleTrace().queries().get(0);
+        assertEquals("[0, 'Missing']", query.parameters());
+        assertEquals(3, query.rows());
+    }
+
+    @Test
+    void leavesRowsUnknownForStatementsWithoutResult() {
+        handle(request(DispatcherType.REQUEST, "/books"), () -> {
+            try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+                statement.executeUpdate("update books set title = title where id = 1");
+            }
+        });
+
+        assertEquals(QueryExecution.NO_RESULT, singleTrace().queries().get(0).rows());
     }
 
     @Test

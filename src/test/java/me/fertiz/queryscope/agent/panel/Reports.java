@@ -18,15 +18,15 @@ final class Reports {
     }
 
     static RequestReport plain(long id, String path) {
-        QueryExecution query = new QueryExecution("select 1", 500_000, 250_000, null, false);
+        QueryExecution query = new QueryExecution("select 1", "", 500_000, 250_000, 1, null, false);
         return new RequestReport(new RequestTrace(id, UnitKind.HTTP, "GET", path, 200, STARTED_AT, 2_000_000, List.of(query)), List.of());
     }
 
     static RequestReport withFindings() {
-        QueryExecution first = new QueryExecution("select * from orders where customer_id = 1", 1_000_000, 500_000,
-                "com.acme.Mapper.toDto(Mapper.java:7)", false);
-        QueryExecution second = new QueryExecution("select * from orders where customer_id = 2", 2_000_000, 120_000_000,
-                "com.acme.Mapper.toDto(Mapper.java:7)", true);
+        QueryExecution first = new QueryExecution("select * from orders where customer_id = 1", "", 1_000_000,
+                500_000, 3, "com.acme.Mapper.toDto(Mapper.java:7)", false);
+        QueryExecution second = new QueryExecution("select * from orders where customer_id = 2", "", 2_000_000,
+                120_000_000, QueryExecution.NO_RESULT, "com.acme.Mapper.toDto(Mapper.java:7)", true);
         RequestTrace trace = new RequestTrace(7, UnitKind.HTTP, "GET", "/customers?q=\"x\"", 500, STARTED_AT, 125_000_000,
                 List.of(first, second));
         return new RequestReport(trace, List.of(

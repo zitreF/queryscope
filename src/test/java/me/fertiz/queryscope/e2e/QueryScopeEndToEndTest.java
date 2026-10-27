@@ -80,12 +80,43 @@ class QueryScopeEndToEndTest {
         JsonNode report = requestAndReport("/api/customers/naive");
 
         assertEquals(41, report.path("queries").size());
-        JsonNode finding = single(report.path("findings"));
-        assertEquals("nPlusOne", finding.path("type").asString());
+        JsonNode finding = finding(report, "nPlusOne");
         assertEquals(40, finding.path("executions").asInt());
         assertTrue(finding.path("sql").asString().contains("from orders"), finding.toString());
         assertTrue(finding.path("callSite").asString()
                 .startsWith("me.fertiz.queryscope.demo.customer.CustomerSummary.of("), finding.toString());
+        assertEquals(41, finding(report, "tooManyQueries").path("queries").asInt());
+    }
+
+    @Test
+    void reportsTheSameLookupRunTwiceWithTheSameParameters() throws Exception {
+        JsonNode report = requestAndReport("/api/customers/7/card");
+
+        JsonNode finding = single(report.path("findings"));
+        assertEquals("duplicateQuery", finding.path("type").asString());
+        assertEquals("[7]", finding.path("parameters").asString());
+        assertEquals(2, finding.path("executions").asInt());
+        assertTrue(finding.path("callSite").asString()
+                .startsWith("me.fertiz.queryscope.demo.customer.CustomerCardService.nameOf("), finding.toString());
+    }
+
+    @Test
+    void reportsInsertsThatWereNotBatched() throws Exception {
+        String path = "/api/reports/visits?count=12";
+        assertEquals(200, DemoProcess.post(appPort, path).statusCode());
+
+        JsonNode finding = finding(reportFor(panelPort, path), "repeatedWrite");
+        assertEquals(12, finding.path("executions").asInt());
+        assertTrue(finding.path("sql").asString().startsWith("insert into audit_events"), finding.toString());
+    }
+
+    @Test
+    void reportsQueriesThatLoadFarMoreRowsThanTheyShow() throws Exception {
+        JsonNode report = requestAndReport("/api/reports/recent-returns");
+
+        JsonNode finding = finding(report, "largeResult");
+        assertEquals(50_000, finding.path("rows").asInt());
+        assertEquals(50_000, report.path("queries").get(0).path("rows").asInt());
     }
 
     @Test
@@ -158,6 +189,16 @@ class QueryScopeEndToEndTest {
             }
         }
         return Optional.empty();
+    }
+
+    private static JsonNode finding(JsonNode report, String type) {
+        JsonNode findings = report.path("findings");
+        for (int index = 0; index < findings.size(); index++) {
+            if (findings.get(index).path("type").asString().equals(type)) {
+                return findings.get(index);
+            }
+        }
+        throw new AssertionError("No " + type + " finding in " + findings);
     }
 
     private static JsonNode single(JsonNode array) {

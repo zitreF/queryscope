@@ -16,6 +16,12 @@
     --yellow-bg: rgba(253, 214, 99, 0.12);
     --green: #81c995;
     --purple: #c58af9;
+    --purple-bg: rgba(197, 138, 249, 0.12);
+    --orange: #fcad70;
+    --orange-bg: rgba(252, 173, 112, 0.12);
+    --cyan: #78d9ec;
+    --cyan-bg: rgba(120, 217, 236, 0.12);
+    --gray-bg: rgba(154, 160, 166, 0.16);
     --sans: Roboto, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
     --mono: "Roboto Mono", "JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
 }
@@ -374,6 +380,10 @@ main {
     background: var(--red);
 }
 
+.legend .warn::before {
+    background: var(--orange);
+}
+
 .columns {
     display: grid;
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
@@ -476,6 +486,26 @@ td.ellipsis {
 .label.slow {
     color: var(--yellow);
     background: var(--yellow-bg);
+}
+
+.label.repeated-write {
+    color: var(--purple);
+    background: var(--purple-bg);
+}
+
+.label.duplicate {
+    color: var(--orange);
+    background: var(--orange-bg);
+}
+
+.label.large-result {
+    color: var(--cyan);
+    background: var(--cyan-bg);
+}
+
+.label.too-many {
+    color: var(--text-2);
+    background: var(--gray-bg);
 }
 
 .label + .label {
@@ -641,6 +671,22 @@ td.ellipsis {
     border-left-color: var(--yellow);
 }
 
+.finding.repeated-write {
+    border-left-color: var(--purple);
+}
+
+.finding.duplicate {
+    border-left-color: var(--orange);
+}
+
+.finding.large-result {
+    border-left-color: var(--cyan);
+}
+
+.finding.too-many {
+    border-left-color: var(--muted);
+}
+
 .finding.clean {
     border-left-color: var(--green);
     color: var(--text-2);
@@ -657,6 +703,18 @@ td.ellipsis {
 
 .finding.slow .finding-title {
     color: var(--yellow);
+}
+
+.finding.repeated-write .finding-title {
+    color: var(--purple);
+}
+
+.finding.duplicate .finding-title {
+    color: var(--orange);
+}
+
+.finding.large-result .finding-title {
+    color: var(--cyan);
 }
 
 .sql-block {
@@ -759,6 +817,18 @@ td.ellipsis {
     background: var(--yellow);
 }
 
+.bar.repeated-write {
+    background: var(--purple);
+}
+
+.bar.duplicate {
+    background: var(--orange);
+}
+
+.bar.large-result {
+    background: var(--cyan);
+}
+
 .bar.failed {
     background: repeating-linear-gradient(45deg, var(--red) 0 3px, transparent 3px 6px);
 }
@@ -790,6 +860,26 @@ td.ellipsis {
 
 .query-table tr.slow td:first-child {
     box-shadow: inset 3px 0 var(--yellow);
+}
+
+.query-table tr.repeated-write td:first-child {
+    box-shadow: inset 3px 0 var(--purple);
+}
+
+.query-table tr.duplicate td:first-child {
+    box-shadow: inset 3px 0 var(--orange);
+}
+
+.query-table tr.large-result td:first-child {
+    box-shadow: inset 3px 0 var(--cyan);
+}
+
+.query-table td.params {
+    font-family: var(--mono);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 tr.highlight {

@@ -52,6 +52,13 @@ final class DemoProcess implements AutoCloseable {
         return CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
+    static HttpResponse<String> post(int port, String path) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        return CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
     static boolean responds(int port) throws InterruptedException {
         try {
             get(port, "/");

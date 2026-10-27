@@ -1,10 +1,14 @@
 package me.fertiz.queryscope.agent.analysis;
 
+import me.fertiz.queryscope.agent.data.DuplicateQuery;
 import me.fertiz.queryscope.agent.data.Finding;
+import me.fertiz.queryscope.agent.data.LargeResult;
 import me.fertiz.queryscope.agent.data.NPlusOne;
 import me.fertiz.queryscope.agent.data.QueryExecution;
+import me.fertiz.queryscope.agent.data.RepeatedWrite;
 import me.fertiz.queryscope.agent.data.RequestTrace;
 import me.fertiz.queryscope.agent.data.SlowQuery;
+import me.fertiz.queryscope.agent.data.TooManyQueries;
 import me.fertiz.queryscope.agent.data.UnitKind;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +27,7 @@ class QueryAnalyzerTest {
     private static final String SERVICE = "com.acme.OrderService.summaries(OrderService.java:20)";
     private static final String MAPPER = "com.acme.OrderMapper.toDto(OrderMapper.java:12)";
 
-    private final QueryAnalyzer analyzer = new QueryAnalyzer(3, Duration.ofMillis(100));
+    private final QueryAnalyzer analyzer = new QueryAnalyzer(new Thresholds(3, Duration.ofMillis(100), 500, 10));
 
     @Test
     void reportsSelectRepeatedWithDifferentLiterals() {
@@ -61,12 +65,33 @@ class QueryAnalyzerTest {
     }
 
     @Test
-    void repeatedWritesAreNoNPlusOne() {
-        List<QueryExecution> queries = IntStream.rangeClosed(1, 5)
+    void reportsRepeatedWritesAsUnbatched() {
+        List<QueryExecution> queries = IntStream.rangeClosed(1, 4)
                 .mapToObj(id -> query("insert into orders (id) values (" + id + ")", SERVICE, 1))
                 .toList();
 
-        assertTrue(analyze(queries).isEmpty());
+        assertEquals(List.of(new RepeatedWrite("insert into orders (id) values (?)", SERVICE,
+                List.of(0, 1, 2, 3), Duration.ofMillis(4).toNanos())), analyze(queries));
+    }
+
+    @Test
+    void reportsTheSameQueryWithTheSameParametersRunTwice() {
+        List<QueryExecution> queries = List.of(
+                query("select name from customers where id = ?", "[7]", MAPPER),
+                query("select email from customers where id = ?", "[7]", MAPPER),
+                query("select name from customers where id = ?", "[7]", SERVICE));
+
+        assertEquals(List.of(new DuplicateQuery("select name from customers where id = ?", "[7]", MAPPER,
+                List.of(0, 2))), analyze(queries));
+    }
+
+    @Test
+    void doesNotRepeatAnNPlusOneAsDuplicates() {
+        List<QueryExecution> queries = IntStream.range(0, 3)
+                .mapToObj(index -> query("select * from orders where customer_id = ?", "[1]", MAPPER))
+                .toList();
+
+        assertEquals(List.of(NPlusOne.class), analyze(queries).stream().map(Object::getClass).toList());
     }
 
     @Test
@@ -75,17 +100,41 @@ class QueryAnalyzerTest {
                 query("select count(*) from audit_events", SERVICE, 99),
                 query("select type, count(*) from audit_events group by type", SERVICE, 100));
 
+        assertEquals(List.of(new SlowQuery(1, queries.get(1))), analyze(queries));
+    }
+
+    @Test
+    void reportsQueriesThatReturnManyRows() {
+        QueryExecution small = new QueryExecution("select * from orders", "", 0, 1_000, 499, SERVICE, false);
+        QueryExecution large = new QueryExecution("select * from audit_events", "", 0, 1_000, 500, SERVICE, false);
+
+        assertEquals(List.of(new LargeResult(1, large)), analyze(List.of(small, large)));
+    }
+
+    @Test
+    void reportsRequestsWithTooManyQueries() {
+        List<QueryExecution> queries = IntStream.range(0, 10)
+                .mapToObj(index -> query("select * from table_" + (char) ('a' + index), SERVICE, 2))
+                .toList();
+
         List<Finding> findings = analyze(queries);
 
-        assertEquals(List.of(new SlowQuery(1, queries.get(1))), findings);
+        assertEquals(List.of(new TooManyQueries(10, 10, Duration.ofMillis(20).toNanos(), Duration.ofMillis(50).toNanos())),
+                findings);
     }
 
     private List<Finding> analyze(List<QueryExecution> queries) {
-        RequestTrace trace = new RequestTrace(1, UnitKind.HTTP, "GET", "/orders", 200, Instant.now(), 0, queries);
+        RequestTrace trace = new RequestTrace(1, UnitKind.HTTP, "GET", "/orders", 200, Instant.now(),
+                Duration.ofMillis(50).toNanos(), queries);
         return analyzer.analyze(trace).findings();
     }
 
     private static QueryExecution query(String sql, String callSite, long millis) {
-        return new QueryExecution(sql, 0, Duration.ofMillis(millis).toNanos(), callSite, false);
+        return new QueryExecution(sql, "", 0, Duration.ofMillis(millis).toNanos(), QueryExecution.NO_RESULT,
+                callSite, false);
+    }
+
+    private static QueryExecution query(String sql, String parameters, String callSite) {
+        return new QueryExecution(sql, parameters, 0, 1_000, 1, callSite, false);
     }
 }

@@ -2,6 +2,7 @@ package me.fertiz.queryscope.agent.instrument;
 
 import me.fertiz.queryscope.agent.trace.RequestTracer;
 import net.bytebuddy.asm.Advice;
+import net.bytebuddy.implementation.bytecode.assign.Assigner;
 
 public final class ExecuteSqlAdvice {
 
@@ -14,7 +15,11 @@ public final class ExecuteSqlAdvice {
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class)
-    public static void exit(@Advice.Argument(0) String sql, @Advice.Thrown Throwable thrown) {
-        RequestTracer.queryFinished(sql, thrown != null);
+    public static void exit(
+            @Advice.Argument(0) String sql,
+            @Advice.Return(typing = Assigner.Typing.DYNAMIC) Object result,
+            @Advice.Thrown Throwable thrown
+    ) {
+        RequestTracer.queryFinished(sql, thrown != null, result);
     }
 }

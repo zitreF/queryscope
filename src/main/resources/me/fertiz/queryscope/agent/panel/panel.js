@@ -18,6 +18,16 @@ const SQL_KEYWORDS = new Set([
     'between', 'union', 'all', 'with', 'returning', 'fetch', 'first', 'next', 'rows', 'only', 'true', 'false', 'default',
 ]);
 
+const FINDING_TYPES = {
+    nPlusOne: {css: 'n-plus-one', name: 'N+1', label: finding => `N+1 ×${finding.executions}`},
+    slowQuery: {css: 'slow', name: 'Slow', label: finding => `Slow ${formatMs(finding.durationMs)}`},
+    repeatedWrite: {css: 'repeated-write', name: 'Writes', label: finding => `Writes ×${finding.executions}`},
+    duplicateQuery: {css: 'duplicate', name: 'Duplicate', label: finding => `Duplicate ×${finding.executions}`},
+    largeResult: {css: 'large-result', name: 'Rows', label: finding => `${formatCount(finding.rows)} rows`},
+    tooManyQueries: {css: 'too-many', name: 'Queries', label: finding => `${finding.queries} queries`},
+};
+const ROLE_ORDER = ['duplicateQuery', 'repeatedWrite', 'largeResult', 'nPlusOne', 'slowQuery'];
+
 const state = {
     reports: [],
     pending: [],
@@ -46,12 +56,13 @@ const COLORS = {
     blue: color('--blue'),
     red: color('--red'),
     yellow: color('--yellow'),
+    orange: color('--orange'),
     muted: color('--muted'),
     border: color('--border'),
     text: color('--text'),
     mono: color('--mono'),
 };
-const SEVERITY_COLORS = {'ok': COLORS.blue, 'slow': COLORS.yellow, 'n-plus-one': COLORS.red};
+const SEVERITY_COLORS = {'ok': COLORS.blue, 'warn': COLORS.orange, 'slow': COLORS.yellow, 'n-plus-one': COLORS.red};
 
 const streamCanvas = $('stream-canvas');
 const tooltip = $('stream-tooltip');
@@ -94,7 +105,7 @@ function connect() {
             const response = await fetch('api/requests');
             const stored = (await response.json()).map(enrich);
             state.reports = newestUnique([...buffered.reverse(), ...stored]);
-            state.reports.forEach(report => report.findings.forEach(finding => state.announced.add(findingKey(finding))));
+            state.reports.forEach(report => report.findings.forEach(finding => state.announced.add(findingKey(report, finding))));
             relayoutLanes();
             render();
             setConnection(true);
@@ -127,16 +138,14 @@ function add(report) {
 
 function enrich(report) {
     const start = parseInstant(report.startedAt);
-    const nPlusOnes = report.findings.filter(isNPlusOne);
-    const slow = report.findings.filter(finding => !isNPlusOne(finding));
+    const types = new Set(report.findings.map(finding => finding.type));
     report.view = {
         start,
         end: start + report.durationMs,
         dbMs: report.queries.reduce((sum, query) => sum + query.durationMs, 0),
         endpointPath: endpointPath(report.path),
-        severity: nPlusOnes.length > 0 ? 'n-plus-one' : slow.length > 0 ? 'slow' : 'ok',
-        nPlusOnes,
-        slow,
+        severity: types.has('nPlusOne') ? 'n-plus-one' : types.has('slowQuery') ? 'slow' : types.size > 0 ? 'warn' : 'ok',
+        types,
         lane: 0,
     };
     return report;
@@ -249,8 +258,8 @@ function renderStats() {
     const queries = recent.reduce((sum, report) => sum + report.queries.length, 0);
     const duration = recent.reduce((sum, report) => sum + report.durationMs, 0);
     const db = recent.reduce((sum, report) => sum + report.view.dbMs, 0);
-    const withNPlusOne = state.reports.filter(report => report.view.nPlusOnes.length > 0);
-    const withSlow = state.reports.filter(report => report.view.slow.length > 0);
+    const withNPlusOne = state.reports.filter(report => report.view.types.has('nPlusOne'));
+    const withSlow = state.reports.filter(report => report.view.types.has('slowQuery'));
     const dbSeries = series(end, report => report.view.dbMs);
     const durationSeries = series(end, report => report.durationMs);
     const stats = [
@@ -462,14 +471,13 @@ function renderEndpoints() {
         const key = `${report.method} ${report.view.endpointPath}`;
         const group = groups.get(key) ?? {
             method: report.method, path: report.view.endpointPath, latestId: report.id,
-            calls: 0, queries: 0, duration: 0, db: 0, nPlusOne: false, slow: false,
+            calls: 0, queries: 0, duration: 0, db: 0, types: new Set(),
         };
         group.calls++;
         group.queries += report.queries.length;
         group.duration += report.durationMs;
         group.db += report.view.dbMs;
-        group.nPlusOne ||= report.view.nPlusOnes.length > 0;
-        group.slow ||= report.view.slow.length > 0;
+        report.view.types.forEach(type => group.types.add(type));
         groups.set(key, group);
     }
     const top = [...groups.values()].sort((a, b) => b.db - a.db).slice(0, TOP_ENDPOINTS);
@@ -484,7 +492,7 @@ function renderEndpoints() {
             {title: 'Queries per call', width: '120px', number: true},
             {title: 'Avg time', width: '90px', number: true},
             {title: 'Database time', width: '120px', number: true},
-            {title: 'Findings', width: '130px'},
+            {title: 'Findings', width: '190px'},
         ],
         top.map(group => el('tr', {class: 'clickable', onclick: () => openRequest(group.latestId)},
             el('td', {class: 'mono ellipsis', title: group.path}, el('span', {class: 'method'}, group.method), group.path),
@@ -492,10 +500,9 @@ function renderEndpoints() {
             el('td', {class: 'number'}, (group.queries / group.calls).toFixed(1)),
             el('td', {class: 'number'}, formatMs(group.duration / group.calls)),
             el('td', {class: 'number'}, formatMs(group.db)),
-            el('td', {},
-                group.nPlusOne ? el('span', {class: 'label n-plus-one'}, 'N+1') : null,
-                group.slow ? el('span', {class: 'label slow'}, 'Slow') : null,
-                !group.nPlusOne && !group.slow ? '—' : null)))));
+            el('td', {}, group.types.size === 0 ? '—' : Object.keys(FINDING_TYPES)
+                .filter(type => group.types.has(type))
+                .map(type => el('span', {class: `label ${FINDING_TYPES[type].css}`}, FINDING_TYPES[type].name)))))));
 }
 
 function renderFeed() {
@@ -510,14 +517,14 @@ function renderFeed() {
     }
     state.feedTimes = [];
     if (items.length === 0) {
-        $('findings-feed').replaceChildren(el('p', {class: 'empty'}, 'No N+1 or slow queries so far.'));
+        $('findings-feed').replaceChildren(el('p', {class: 'empty'}, 'No findings so far.'));
         return;
     }
     const current = now();
     $('findings-feed').replaceChildren(table(
         [
             {title: 'When', width: '80px'},
-            {title: 'Finding', width: '110px'},
+            {title: 'Finding', width: '130px'},
             {title: 'Request and location', width: 'auto'},
         ],
         items.slice(0, FEED_SIZE).map(({report, finding}) => {
@@ -543,15 +550,14 @@ function table(columns, rows) {
 }
 
 function announce(report) {
-    const finding = report.findings.find(candidate => !state.announced.has(findingKey(candidate)));
+    const finding = report.findings.find(candidate => !state.announced.has(findingKey(report, candidate)));
     if (!finding) {
         return;
     }
-    report.findings.forEach(candidate => state.announced.add(findingKey(candidate)));
+    report.findings.forEach(candidate => state.announced.add(findingKey(report, candidate)));
     const snackbar = $('snackbar');
-    $('snackbar-text').textContent = isNPlusOne(finding)
-        ? `New N+1 (${finding.executions} queries) in ${report.method} ${report.view.endpointPath}`
-        : `New slow query (${formatMs(finding.durationMs)}) in ${report.method} ${report.view.endpointPath}`;
+    $('snackbar-text').textContent =
+        `New finding: ${findingText(finding)} in ${report.method} ${report.view.endpointPath}`;
     $('snackbar-action').onclick = () => {
         snackbar.hidden = true;
         openRequest(report.id);
@@ -629,9 +635,17 @@ function fact(term, value) {
 
 function findingCards(report) {
     if (report.findings.length === 0) {
-        return [el('div', {class: 'finding clean'}, 'No N+1 or slow queries in this request.')];
+        return [el('div', {class: 'finding clean'}, 'No findings in this request.')];
     }
-    return report.findings.map(finding => isNPlusOne(finding) ? nPlusOneCard(finding) : slowQueryCard(finding));
+    const cards = {
+        nPlusOne: nPlusOneCard,
+        slowQuery: slowQueryCard,
+        repeatedWrite: repeatedWriteCard,
+        duplicateQuery: duplicateQueryCard,
+        largeResult: largeResultCard,
+        tooManyQueries: tooManyQueriesCard,
+    };
+    return report.findings.filter(finding => cards[finding.type]).map(finding => cards[finding.type](finding));
 }
 
 function nPlusOneCard(finding) {
@@ -650,6 +664,44 @@ function slowQueryCard(finding) {
         el('div', {class: 'finding-meta'}, callSiteLine(finding.callSite), ` · query #${finding.queryIndex + 1}`),
         el('div', {class: 'finding-hint'},
             'Check the query plan (EXPLAIN) for full table scans, a missing index or a join on an unindexed column.'));
+}
+
+function repeatedWriteCard(finding) {
+    return el('div', {class: 'finding repeated-write'},
+        el('div', {class: 'finding-title'}, `Unbatched writes: the same statement ran ${finding.executions} times`),
+        el('code', {class: 'sql-block'}, highlightSql(finding.sql)),
+        el('div', {class: 'finding-meta'}, callSiteLine(finding.callSite), ` · ${formatMs(finding.totalMs)} in total`),
+        el('div', {class: 'finding-hint'},
+            'Send them as one batch: addBatch and executeBatch, or hibernate.jdbc.batch_size with sequence-generated ids.'));
+}
+
+function duplicateQueryCard(finding) {
+    return el('div', {class: 'finding duplicate'},
+        el('div', {class: 'finding-title'},
+            `Duplicate query: the same SELECT with the same parameters ran ${finding.executions} times`),
+        el('code', {class: 'sql-block'}, highlightSql(finding.sql)),
+        el('div', {class: 'finding-meta'}, `Parameters ${finding.parameters || 'none'} · `, callSiteLine(finding.callSite)),
+        el('div', {class: 'finding-hint'}, 'Reuse the first result, pass it along, or cache it for the request.'));
+}
+
+function largeResultCard(finding) {
+    return el('div', {class: 'finding large-result'},
+        el('div', {class: 'finding-title'}, `Large result: ${formatCount(finding.rows)} rows`),
+        el('code', {class: 'sql-block'}, highlightSql(finding.sql)),
+        el('div', {class: 'finding-meta'}, callSiteLine(finding.callSite), ` · query #${finding.queryIndex + 1}`),
+        el('div', {class: 'finding-hint'},
+            'Fetch only what the response needs: paginate (LIMIT, Pageable), filter in SQL or select fewer columns.'));
+}
+
+function tooManyQueriesCard(finding) {
+    const share = finding.durationMs > 0 ? Math.min(100, Math.round(finding.databaseMs / finding.durationMs * 100)) : 0;
+    return el('div', {class: 'finding too-many'},
+        el('div', {class: 'finding-title'}, `Too many queries: ${finding.queries} in one unit of work`),
+        el('div', {class: 'finding-meta'},
+            `${share}% of the time in the database (${formatMs(finding.databaseMs)} of ${formatMs(finding.durationMs)})`
+            + ` · the limit is ${finding.limit}`),
+        el('div', {class: 'finding-hint'},
+            'Look for N+1 patterns and repeated lookups, and load related data with joins instead of separate queries.'));
 }
 
 function callSiteLine(callSite) {
@@ -682,16 +734,20 @@ function queryTable(report, roles) {
         el('td', {class: 'number'}, String(index + 1)),
         el('td', {class: 'number'}, `+${formatMs(query.offsetMs)}`),
         el('td', {class: 'number'}, formatMs(query.durationMs)),
+        el('td', {class: 'number'}, query.rows === null || query.rows === undefined ? '—' : formatCount(query.rows)),
         el('td', {class: 'sql', title: oneLine(query.sql)},
             query.failed ? el('span', {class: 'status-error'}, 'Failed ') : null, highlightSql(oneLine(query.sql))),
+        el('td', {class: 'params', title: query.parameters || ''}, query.parameters || '—'),
         el('td', {class: 'call-site', title: query.callSite ?? ''}, query.callSite ? shortCallSite(query.callSite) : '—')));
     const queries = table(
         [
-            {title: '#', width: '56px', number: true},
-            {title: 'Start', width: '96px', number: true},
-            {title: 'Duration', width: '96px', number: true},
+            {title: '#', width: '52px', number: true},
+            {title: 'Start', width: '90px', number: true},
+            {title: 'Duration', width: '90px', number: true},
+            {title: 'Rows', width: '76px', number: true},
             {title: 'SQL', width: 'auto'},
-            {title: 'Called from', width: '28%'},
+            {title: 'Parameters', width: '15%'},
+            {title: 'Called from', width: '22%'},
         ],
         queryRows);
     queries.classList.add('query-table');
@@ -700,11 +756,11 @@ function queryTable(report, roles) {
 
 function queryRoles(report) {
     const roles = report.queries.map(() => '');
-    for (const finding of report.view.nPlusOnes) {
-        finding.queryIndexes.forEach(index => roles[index] = 'n-plus-one');
-    }
-    for (const finding of report.view.slow) {
-        roles[finding.queryIndex] = 'slow';
+    for (const type of ROLE_ORDER) {
+        for (const finding of report.findings.filter(candidate => candidate.type === type)) {
+            const indexes = finding.queryIndexes ?? [finding.queryIndex];
+            indexes.forEach(index => roles[index] = FINDING_TYPES[type].css);
+        }
     }
     return roles;
 }
@@ -741,21 +797,21 @@ function highlightSql(sql) {
 }
 
 function findingLabel(finding) {
-    return isNPlusOne(finding)
-        ? el('span', {class: 'label n-plus-one'}, `N+1 ×${finding.executions}`)
-        : el('span', {class: 'label slow'}, `Slow ${formatMs(finding.durationMs)}`);
+    const type = FINDING_TYPES[finding.type];
+    return el('span', {class: `label ${type ? type.css : ''}`}, findingText(finding));
+}
+
+function findingText(finding) {
+    const type = FINDING_TYPES[finding.type];
+    return type ? type.label(finding) : finding.type;
 }
 
 function isTask(report) {
     return report.kind === 'task';
 }
 
-function isNPlusOne(finding) {
-    return finding.type === 'nPlusOne';
-}
-
-function findingKey(finding) {
-    return `${finding.type}|${finding.sql}|${finding.callSite}`;
+function findingKey(report, finding) {
+    return `${finding.type}|${finding.sql ?? ''}|${finding.callSite ?? `${report.method} ${report.view.endpointPath}`}`;
 }
 
 function parseInstant(text) {
@@ -772,6 +828,10 @@ function shortCallSite(callSite) {
     const open = callSite.indexOf('(');
     const qualified = open < 0 ? callSite : callSite.slice(0, open);
     return qualified.split('.').slice(-2).join('.') + (open < 0 ? '' : callSite.slice(open));
+}
+
+function formatCount(count) {
+    return count.toLocaleString('en-US');
 }
 
 function oneLine(sql) {

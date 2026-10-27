@@ -52,6 +52,13 @@ final class JsonWriter {
         return this;
     }
 
+    JsonWriter nullValue() {
+        separate();
+        json.append("null");
+        needsComma = true;
+        return this;
+    }
+
     JsonWriter value(long value) {
         separate();
         json.append(value);

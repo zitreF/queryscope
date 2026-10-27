@@ -1,6 +1,5 @@
 package me.fertiz.queryscope.agent.trace;
 
-import me.fertiz.queryscope.agent.data.QueryExecution;
 import me.fertiz.queryscope.agent.data.RequestTrace;
 import me.fertiz.queryscope.agent.data.UnitKind;
 
@@ -19,7 +18,7 @@ final class ActiveRequest {
     private final boolean background;
     private final Instant startedAt = Instant.now();
     private final long startedNanos = System.nanoTime();
-    private final List<QueryExecution> queries = new ArrayList<>();
+    private final List<QueryRecord> queries = new ArrayList<>();
     private int queryDepth;
     private long queryStartedNanos;
     private long queryFinishedNanos = startedNanos;
@@ -70,14 +69,17 @@ final class ActiveRequest {
         return true;
     }
 
-    void addQuery(String sql, boolean failed, String callSite) {
-        queries.add(new QueryExecution(
-                sql, queryStartedNanos - startedNanos, queryFinishedNanos - queryStartedNanos, callSite, failed));
+    QueryRecord addQuery(String sql, String parameters, boolean failed, String callSite) {
+        QueryRecord query = new QueryRecord(sql, parameters, queryStartedNanos - startedNanos,
+                queryFinishedNanos - queryStartedNanos, callSite, failed);
+        queries.add(query);
+        return query;
     }
 
     RequestTrace finish(int status) {
         long endNanos = background ? queryFinishedNanos : System.nanoTime();
         return new RequestTrace(
-                id, kind, method, path, status, startedAt, endNanos - startedNanos, List.copyOf(queries));
+                id, kind, method, path, status, startedAt, endNanos - startedNanos,
+                queries.stream().map(QueryRecord::toExecution).toList());
     }
 }

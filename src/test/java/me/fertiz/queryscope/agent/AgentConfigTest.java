@@ -18,9 +18,10 @@ class AgentConfigTest {
 
     @Test
     void readsCommaSeparatedOptions() {
-        AgentConfig config = AgentConfig.parse("port=9090, nPlusOneThreshold=3,slowQueryMs=250");
+        AgentConfig config = AgentConfig.parse(
+                "port=9090, nPlusOneThreshold=3,slowQueryMs=250,largeResultRows=1000,maxQueries=50");
 
-        assertEquals(new AgentConfig(9090, 3, Duration.ofMillis(250), List.of()), config);
+        assertEquals(new AgentConfig(9090, 3, Duration.ofMillis(250), 1000, 50, List.of()), config);
     }
 
     @Test

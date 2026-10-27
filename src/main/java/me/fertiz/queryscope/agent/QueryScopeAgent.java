@@ -22,7 +22,7 @@ public final class QueryScopeAgent {
 
     public static void premain(String arguments, Instrumentation instrumentation) {
         AgentConfig config = AgentConfig.parse(arguments);
-        QueryAnalyzer analyzer = new QueryAnalyzer(config.nPlusOneThreshold(), config.slowQueryThreshold());
+        QueryAnalyzer analyzer = new QueryAnalyzer(config.thresholds());
         ConsoleReporter console = new ConsoleReporter();
         ReportStore store = new ReportStore(STORED_REQUESTS);
         RequestTracer.publishTo(trace -> {

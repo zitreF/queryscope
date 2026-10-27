@@ -1,10 +1,19 @@
 package me.fertiz.queryscope.agent.panel;
 
+import me.fertiz.queryscope.agent.data.DuplicateQuery;
+import me.fertiz.queryscope.agent.data.LargeResult;
+import me.fertiz.queryscope.agent.data.QueryExecution;
+import me.fertiz.queryscope.agent.data.RepeatedWrite;
+import me.fertiz.queryscope.agent.data.RequestReport;
+import me.fertiz.queryscope.agent.data.RequestTrace;
+import me.fertiz.queryscope.agent.data.TooManyQueries;
+import me.fertiz.queryscope.agent.data.UnitKind;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReportJsonTest {
 
@@ -12,10 +21,10 @@ class ReportJsonTest {
     void writesRequestQueriesAndFindings() {
         String expected = "{\"id\":7,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/customers?q=\\\"x\\\"\",\"status\":500,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":125.000,\"queries\":["
-                + "{\"sql\":\"select * from orders where customer_id = 1\",\"offsetMs\":1.000,\"durationMs\":0.500,"
-                + "\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"failed\":false},"
-                + "{\"sql\":\"select * from orders where customer_id = 2\",\"offsetMs\":2.000,\"durationMs\":120.000,"
-                + "\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"failed\":true}],\"findings\":["
+                + "{\"sql\":\"select * from orders where customer_id = 1\",\"parameters\":\"\",\"offsetMs\":1.000,"
+                + "\"durationMs\":0.500,\"rows\":3,\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"failed\":false},"
+                + "{\"sql\":\"select * from orders where customer_id = 2\",\"parameters\":\"\",\"offsetMs\":2.000,"
+                + "\"durationMs\":120.000,\"rows\":null,\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"failed\":true}],\"findings\":["
                 + "{\"type\":\"nPlusOne\",\"sql\":\"select * from orders where customer_id = ?\","
                 + "\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"executions\":2,\"totalMs\":120.500,"
                 + "\"queryIndexes\":[0,1]},"
@@ -31,10 +40,33 @@ class ReportJsonTest {
 
         assertEquals("[{\"id\":2,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/b\",\"status\":200,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":2.000,\"queries\":[{\"sql\":\"select 1\","
-                + "\"offsetMs\":0.500,\"durationMs\":0.250,\"callSite\":null,\"failed\":false}],\"findings\":[]},"
+                + "\"parameters\":\"\",\"offsetMs\":0.500,\"durationMs\":0.250,\"rows\":1,\"callSite\":null,\"failed\":false}],\"findings\":[]},"
                 + "{\"id\":1,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/a\",\"status\":200,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":2.000,\"queries\":[{\"sql\":\"select 1\","
-                + "\"offsetMs\":0.500,\"durationMs\":0.250,\"callSite\":null,\"failed\":false}],\"findings\":[]}]", json);
+                + "\"parameters\":\"\",\"offsetMs\":0.500,\"durationMs\":0.250,\"rows\":1,\"callSite\":null,\"failed\":false}],\"findings\":[]}]", json);
+    }
+
+    @Test
+    void writesEveryKindOfFinding() {
+        QueryExecution query = new QueryExecution("select * from events", "[1]", 0, 1_000_000, 900, null, false);
+        RequestTrace trace = new RequestTrace(9, UnitKind.TASK, "TASK", "ImportJob.run", 0, Reports.STARTED_AT,
+                2_000_000, List.of(query));
+
+        String json = ReportJson.of(new RequestReport(trace, List.of(
+                new RepeatedWrite("insert into events values (?)", null, List.of(0), 1_000_000),
+                new DuplicateQuery("select * from events where id = ?", "[1]", null, List.of(0, 0)),
+                new LargeResult(0, query),
+                new TooManyQueries(31, 30, 1_000_000, 2_000_000))));
+
+        assertTrue(json.contains("\"kind\":\"task\""), json);
+        assertTrue(json.contains("{\"type\":\"repeatedWrite\",\"sql\":\"insert into events values (?)\","
+                + "\"callSite\":null,\"executions\":1,\"totalMs\":1.000,\"queryIndexes\":[0]}"), json);
+        assertTrue(json.contains("{\"type\":\"duplicateQuery\",\"sql\":\"select * from events where id = ?\","
+                + "\"parameters\":\"[1]\",\"callSite\":null,\"executions\":2,\"queryIndexes\":[0,0]}"), json);
+        assertTrue(json.contains("{\"type\":\"largeResult\",\"sql\":\"select * from events\",\"callSite\":null,"
+                + "\"rows\":900,\"queryIndex\":0}"), json);
+        assertTrue(json.contains("{\"type\":\"tooManyQueries\",\"queries\":31,\"limit\":30,\"databaseMs\":1.000,"
+                + "\"durationMs\":2.000}"), json);
     }
 
     @Test

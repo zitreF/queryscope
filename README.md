@@ -28,6 +28,9 @@ app, and stop both with Ctrl+C.
 - **N+1 detection.** The same SELECT repeated within one request is reported together with the line of your code
   that triggered it, for example `CustomerSummary.of(CustomerSummary.java:12)`.
 - **Slow queries.** Every query above a threshold you choose, 100 ms by default.
+- **More checks.** Unbatched writes (the same INSERT, UPDATE or DELETE repeated in one request), duplicate queries
+  (the same SELECT with the same bound parameters run twice), large results (a query that returns 500 rows or more)
+  and requests that simply run too many queries. Every query shows its parameters and the rows it returned.
 - **Live tracking.** Keep the app running and use it: the Live tab draws every request on a moving time axis, with
   one tick per SQL query, N+1 requests in red and slow ones in yellow. Below are live counters, a table of endpoints
   by time spent in the database and the latest findings. A short notice appears whenever a new problem shows up.
@@ -58,6 +61,9 @@ On Windows use `gradlew.bat`. Open the panel at http://localhost:7070 and call t
 | http://localhost:8080/api/customers/naive           | `findAll()`, then reads each customer's lazy `orders` collection    | 41 queries, N+1 ×40     |
 | http://localhost:8080/api/customers/optimized       | the same summaries with `left join fetch c.orders`                  | 1 query, no findings    |
 | http://localhost:8080/api/reports/customer-activity | joins 150k audit events with customers on an unindexed email column | slow query, about 0.5 s |
+| http://localhost:8080/api/customers/7/card          | looks the customer's name up twice through the same helper          | duplicate query `[7]`   |
+| http://localhost:8080/api/reports/recent-returns    | loads every return event and keeps the 20 newest in memory          | 50,000 rows             |
+| `curl -X POST localhost:8080/api/reports/visits`    | inserts 20 events one statement at a time                           | 20 unbatched writes     |
 
 The demo also runs a scheduled job every 30 seconds that builds the same naive summaries outside any HTTP request. It
 shows up as the task `CustomerService.summariesNaive` with the same N+1, and the data loaded at startup shows up as
@@ -189,8 +195,10 @@ java -javaagent:/path/to/queryscope.jar=port=9090,nPlusOneThreshold=3,slowQueryM
 | Option              | Default | Meaning                                                      |
 |---------------------|---------|--------------------------------------------------------------|
 | `port`              | `7070`  | Port of the panel on localhost                               |
-| `nPlusOneThreshold` | `5`     | How many runs of the same SELECT in one request make an N+1  |
+| `nPlusOneThreshold` | `5`     | Runs of the same SELECT, or write, that make an N+1          |
 | `slowQueryMs`       | `100`   | Queries taking at least this long are reported as slow       |
+| `largeResultRows`   | `500`   | Queries returning at least this many rows are reported       |
+| `maxQueries`        | `30`    | Requests or tasks running at least this many queries         |
 | `entry`             | none    | `Class#method` whose call becomes one task, can be repeated  |
 
 An unknown option or a value that is not a positive number stops the JVM at startup with a message that names it. If
@@ -207,7 +215,8 @@ QueryScope needs Java 17 or newer and works with any Java app that talks to its 
 
 The demo and the end-to-end test run Spring Boot 4.1 on Tomcat with HikariCP and H2, and `javax.servlet` and tasks are
 covered by in-process tests. QueryScope is a development tool that keeps the SQL of the last 200 requests and tasks
-in memory, so don't attach it in production.
+in memory, together with their bound parameters (strings cut at 64 characters, binary values shown as their size),
+so don't attach it in production.
 
 ## Using the results in scripts and tests
 
@@ -272,15 +281,20 @@ Statement / PreparedStatement.execute* ─time, SQL, call site─┘
   advice serves `jakarta.servlet` and `javax.servlet` and the agent has no compile-time servlet dependency.
 - **RequestTracer** times every query. A call-depth counter makes sure a query is counted once when a pool proxy wraps
   the driver (`HikariProxyPreparedStatement` calling H2's `JdbcPreparedStatement`). `execute()` on a prepared
-  statement carries no SQL, so **StatementSqlRegistry** remembers it from `prepareStatement` in a weak identity map
-  that never keeps statements alive. `StackWalker` records the first frame outside the JDK, frameworks, drivers and
+  statement carries no SQL, so the tracer remembers it from `prepareStatement`, together with the values bound by
+  every `setXxx` call, in a weak identity map that never keeps statements alive. Each returned `ResultSet` is tracked
+  the same way and counts its rows as `next()` is called. `StackWalker` records the first frame outside the JDK,
+  frameworks, drivers and
   generated proxies, which is the line of application code that ran the query. A query with no request around it
   opens a task instead, which ends on `close`, `commit` or `rollback`, after a second without queries, or at 1000
   queries.
 - **SqlNormalizer** turns number and string literals into `?`, collapses `IN (1, 2, 3)` to `IN (?)`, and drops
   comments, case and extra whitespace, so queries that differ only in their values group together.
 - **QueryAnalyzer** reports a SELECT that runs at least `nPlusOneThreshold` times in one request as N+1, naming the
-  call site behind most of the repeats, and every query that takes at least `slowQueryMs` as slow.
+  call site behind most of the repeats, and a write repeated as often as unbatched. The same SELECT with the same
+  parameters run twice is a duplicate, unless it is already part of an N+1. Every query that takes at least
+  `slowQueryMs` is slow, every query returning `largeResultRows` rows is a large result, and a unit of work with
+  `maxQueries` queries or more gets a finding of its own with the share of its time spent in the database.
 - **PanelServer** is the JDK's built-in `com.sun.net.httpserver`, bound to loopback. Every SSE client gets its own
   queue, so a slow browser never holds up an application thread, and requests with a foreign `Host` header are
   rejected to stop DNS rebinding. The panel itself is plain HTML, CSS and JavaScript with no build step and no
