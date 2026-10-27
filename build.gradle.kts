@@ -23,6 +23,7 @@ dependencies {
 
     testImplementation(platform(libs.spring.boot.bom))
     testImplementation(libs.bytebuddy.agent)
+    testImplementation(libs.javax.servlet.api)
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc")
     testImplementation("org.springframework.boot:spring-boot-starter-data-jpa")
     testImplementation("org.springframework.boot:spring-boot-starter-test")

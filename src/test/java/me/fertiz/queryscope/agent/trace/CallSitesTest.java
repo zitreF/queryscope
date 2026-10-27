@@ -2,6 +2,7 @@ package me.fertiz.queryscope.agent.trace;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,6 +12,13 @@ class CallSitesTest {
     void treatsUserPackagesAsApplicationCode() {
         assertTrue(CallSites.isApplicationCode("com.acme.shop.OrderService"));
         assertTrue(CallSites.isApplicationCode("me.fertiz.queryscope.demo.customer.CustomerSummary"));
+    }
+
+    @Test
+    void shortensQualifiedMethodNamesToClassAndMethod() {
+        assertEquals("ImportJob.run", CallSites.shortName("com.acme.jobs.ImportJob.run"));
+        assertEquals("Digest$Weekly.send", CallSites.shortName("com.acme.Digest$Weekly.send"));
+        assertEquals("Main.run", CallSites.shortName("Main.run"));
     }
 
     @Test

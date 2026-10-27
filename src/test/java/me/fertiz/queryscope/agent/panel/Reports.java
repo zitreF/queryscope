@@ -5,6 +5,7 @@ import me.fertiz.queryscope.agent.data.QueryExecution;
 import me.fertiz.queryscope.agent.data.RequestReport;
 import me.fertiz.queryscope.agent.data.RequestTrace;
 import me.fertiz.queryscope.agent.data.SlowQuery;
+import me.fertiz.queryscope.agent.data.UnitKind;
 
 import java.time.Instant;
 import java.util.List;
@@ -18,7 +19,7 @@ final class Reports {
 
     static RequestReport plain(long id, String path) {
         QueryExecution query = new QueryExecution("select 1", 500_000, 250_000, null, false);
-        return new RequestReport(new RequestTrace(id, "GET", path, 200, STARTED_AT, 2_000_000, List.of(query)), List.of());
+        return new RequestReport(new RequestTrace(id, UnitKind.HTTP, "GET", path, 200, STARTED_AT, 2_000_000, List.of(query)), List.of());
     }
 
     static RequestReport withFindings() {
@@ -26,7 +27,7 @@ final class Reports {
                 "com.acme.Mapper.toDto(Mapper.java:7)", false);
         QueryExecution second = new QueryExecution("select * from orders where customer_id = 2", 2_000_000, 120_000_000,
                 "com.acme.Mapper.toDto(Mapper.java:7)", true);
-        RequestTrace trace = new RequestTrace(7, "GET", "/customers?q=\"x\"", 500, STARTED_AT, 125_000_000,
+        RequestTrace trace = new RequestTrace(7, UnitKind.HTTP, "GET", "/customers?q=\"x\"", 500, STARTED_AT, 125_000_000,
                 List.of(first, second));
         return new RequestReport(trace, List.of(
                 new NPlusOne("select * from orders where customer_id = ?", "com.acme.Mapper.toDto(Mapper.java:7)",

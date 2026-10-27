@@ -6,6 +6,7 @@ import me.fertiz.queryscope.agent.data.NPlusOne;
 import me.fertiz.queryscope.agent.data.RequestReport;
 import me.fertiz.queryscope.agent.data.RequestTrace;
 import me.fertiz.queryscope.agent.data.SlowQuery;
+import me.fertiz.queryscope.agent.data.UnitKind;
 
 import java.util.Locale;
 import java.util.function.Consumer;
@@ -19,9 +20,11 @@ public final class ConsoleReporter implements Consumer<RequestReport> {
     public void accept(RequestReport report) {
         RequestTrace trace = report.trace();
         int queries = trace.queries().size();
-        LOGGER.log(System.Logger.Level.INFO, () -> String.format(Locale.ROOT, "%s %s -> %d, %d %s in %.1f ms",
-                trace.method(), trace.path(), trace.status(), queries, queries == 1 ? "query" : "queries",
-                millis(trace.durationNanos())));
+        String unit = trace.kind() == UnitKind.HTTP
+                ? String.format(Locale.ROOT, "%s %s -> %d", trace.method(), trace.path(), trace.status())
+                : "Task " + trace.path();
+        LOGGER.log(System.Logger.Level.INFO, () -> String.format(Locale.ROOT, "%s, %d %s in %.1f ms",
+                unit, queries, queries == 1 ? "query" : "queries", millis(trace.durationNanos())));
         for (Finding finding : report.findings()) {
             LOGGER.log(System.Logger.Level.WARNING, () -> describe(finding));
         }

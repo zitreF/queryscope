@@ -9,6 +9,7 @@ import me.fertiz.queryscope.agent.data.RequestTrace;
 import me.fertiz.queryscope.agent.data.SlowQuery;
 
 import java.util.List;
+import java.util.Locale;
 
 final class ReportJson {
 
@@ -31,6 +32,7 @@ final class ReportJson {
         RequestTrace trace = report.trace();
         json.beginObject()
                 .name("id").value(trace.id())
+                .name("kind").value(trace.kind().name().toLowerCase(Locale.ROOT))
                 .name("method").value(trace.method())
                 .name("path").value(trace.path())
                 .name("status").value(trace.status())

@@ -5,6 +5,7 @@ import java.util.List;
 
 public record RequestTrace(
         long id,
+        UnitKind kind,
         String method,
         String path,
         int status,

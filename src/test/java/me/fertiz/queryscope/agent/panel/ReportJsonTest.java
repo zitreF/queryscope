@@ -10,7 +10,7 @@ class ReportJsonTest {
 
     @Test
     void writesRequestQueriesAndFindings() {
-        String expected = "{\"id\":7,\"method\":\"GET\",\"path\":\"/customers?q=\\\"x\\\"\",\"status\":500,"
+        String expected = "{\"id\":7,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/customers?q=\\\"x\\\"\",\"status\":500,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":125.000,\"queries\":["
                 + "{\"sql\":\"select * from orders where customer_id = 1\",\"offsetMs\":1.000,\"durationMs\":0.500,"
                 + "\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"failed\":false},"
@@ -29,10 +29,10 @@ class ReportJsonTest {
     void writesListsAndNullCallSites() {
         String json = ReportJson.of(List.of(Reports.plain(2, "/b"), Reports.plain(1, "/a")));
 
-        assertEquals("[{\"id\":2,\"method\":\"GET\",\"path\":\"/b\",\"status\":200,"
+        assertEquals("[{\"id\":2,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/b\",\"status\":200,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":2.000,\"queries\":[{\"sql\":\"select 1\","
                 + "\"offsetMs\":0.500,\"durationMs\":0.250,\"callSite\":null,\"failed\":false}],\"findings\":[]},"
-                + "{\"id\":1,\"method\":\"GET\",\"path\":\"/a\",\"status\":200,"
+                + "{\"id\":1,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/a\",\"status\":200,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":2.000,\"queries\":[{\"sql\":\"select 1\","
                 + "\"offsetMs\":0.500,\"durationMs\":0.250,\"callSite\":null,\"failed\":false}],\"findings\":[]}]", json);
     }

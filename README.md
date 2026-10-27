@@ -34,6 +34,8 @@ That is the whole setup. Open http://localhost:7070 and use the app.
   syntax highlighting.
 - **Any data access code.** Works under Hibernate, Spring Data JPA, `JdbcClient`, `JdbcTemplate` or plain JDBC, with
   any driver and connection pool.
+- **Not only HTTP.** Queries that run outside a request, in scheduled jobs, message listeners or a plain `main`, are
+  grouped into tasks, one per connection or transaction, and any method can become its own task with `entry=`.
 - **Stays out of the way.** ByteBuddy is shaded, the panel listens on localhost only, its threads are daemons, and an
   exception inside the instrumentation is swallowed instead of breaking a request.
 
@@ -55,6 +57,10 @@ On Windows use `gradlew.bat`. Open the panel at http://localhost:7070 and call t
 | http://localhost:8080/api/customers/naive           | `findAll()`, then reads each customer's lazy `orders` collection    | 41 queries, N+1 ×40     |
 | http://localhost:8080/api/customers/optimized       | the same summaries with `left join fetch c.orders`                  | 1 query, no findings    |
 | http://localhost:8080/api/reports/customer-activity | joins 150k audit events with customers on an unindexed email column | slow query, about 0.5 s |
+
+The demo also runs a scheduled job every 30 seconds that builds the same naive summaries outside any HTTP request. It
+shows up as the task `CustomerService.summariesNaive` with the same N+1, and the data loaded at startup shows up as
+`DemoApplication.main` with its 150k-row insert flagged as slow.
 
 ## Example: finding and fixing an N+1
 
@@ -164,7 +170,7 @@ tasks.bootRun {
 Options go after the jar path, separated by commas:
 
 ```bash
-java -javaagent:/path/to/queryscope.jar=port=9090,nPlusOneThreshold=3,slowQueryMs=250 -jar your-app.jar
+java -javaagent:/path/to/queryscope.jar=port=9090,nPlusOneThreshold=3,slowQueryMs=250,entry=com.acme.ImportJob#run -jar your-app.jar
 ```
 
 | Option              | Default | Meaning                                                      |
@@ -172,13 +178,23 @@ java -javaagent:/path/to/queryscope.jar=port=9090,nPlusOneThreshold=3,slowQueryM
 | `port`              | `7070`  | Port of the panel on localhost                               |
 | `nPlusOneThreshold` | `5`     | How many runs of the same SELECT in one request make an N+1  |
 | `slowQueryMs`       | `100`   | Queries taking at least this long are reported as slow       |
+| `entry`             | none    | `Class#method` whose call becomes one task, can be repeated  |
 
 An unknown option or a value that is not a positive number stops the JVM at startup with a message that names it. If
 the port is taken, the panel is skipped and findings still go to the log.
 
-QueryScope is built for servlet apps on `jakarta.servlet` (Spring Boot 3 and 4) running Java 17 or newer. The demo and
-the tests run Spring Boot 4.1 on Tomcat with HikariCP and H2. It is a development tool that keeps the SQL of the last
-200 requests in memory, so don't attach it in production.
+QueryScope needs Java 17 or newer and works with any Java app that talks to its database through JDBC:
+
+- **HTTP requests** are recognized in any servlet container, on `jakarta.servlet` and `javax.servlet` alike, so
+  Spring Boot 2, 3 and 4, Tomcat, Jetty and Undertow all work.
+- **Everything else** becomes a task: a scheduled job, a message listener, a batch run or a CLI. A task starts with
+  the first query outside a request and ends when the connection is closed or the transaction committed, and it is
+  named after the application method that ran the queries, such as `ImportJob.run`. With `entry=` a whole method
+  call is one task, however many connections it uses.
+
+The demo and the end-to-end test run Spring Boot 4.1 on Tomcat with HikariCP and H2, and `javax.servlet` and tasks are
+covered by in-process tests. QueryScope is a development tool that keeps the SQL of the last 200 requests and tasks
+in memory, so don't attach it in production.
 
 ## Using the results in scripts and tests
 
@@ -234,15 +250,20 @@ Statement / PreparedStatement.execute* ─time, SQL, call site─┘
                     ConsoleReporter (app log)              ReportStore ─> PanelServer ─SSE─> browser
 ```
 
-- **AgentInstaller** adds ByteBuddy advice to every class that implements `jakarta.servlet.FilterChain`,
-  `java.sql.Connection` or `java.sql.Statement`, plus `HttpServlet.service`. The first `REQUEST` dispatch on a thread
-  opens a trace and its exit closes it, so queries run by filters, forwards and the servlet all land in one request.
-  The advice only calls static methods that take JDK types, so the agent never loads servlet or driver classes itself.
+- **AgentInstaller** is a table of hooks: `FilterChain.doFilter` and `HttpServlet.service` in both servlet namespaces,
+  `prepareStatement`, `close`, `commit` and `rollback` on every `java.sql.Connection`, the `execute` methods of every
+  `java.sql.Statement`, and one hook per `entry=` method. Types are matched by the JDBC and Servlet interfaces they
+  implement, never by driver, pool or container classes. The first `REQUEST` dispatch on a thread opens a trace and
+  its exit closes it, so queries run by filters, forwards and the servlet all land in one request.
+- **Servlets** reads the method, URI and status through `MethodHandle`s looked up once per request class, so one
+  advice serves `jakarta.servlet` and `javax.servlet` and the agent has no compile-time servlet dependency.
 - **RequestTracer** times every query. A call-depth counter makes sure a query is counted once when a pool proxy wraps
   the driver (`HikariProxyPreparedStatement` calling H2's `JdbcPreparedStatement`). `execute()` on a prepared
   statement carries no SQL, so **StatementSqlRegistry** remembers it from `prepareStatement` in a weak identity map
   that never keeps statements alive. `StackWalker` records the first frame outside the JDK, frameworks, drivers and
-  generated proxies, which is the line of application code that ran the query.
+  generated proxies, which is the line of application code that ran the query. A query with no request around it
+  opens a task instead, which ends on `close`, `commit` or `rollback`, after a second without queries, or at 1000
+  queries.
 - **SqlNormalizer** turns number and string literals into `?`, collapses `IN (1, 2, 3)` to `IN (?)`, and drops
   comments, case and extra whitespace, so queries that differ only in their values group together.
 - **QueryAnalyzer** reports a SELECT that runs at least `nPlusOneThreshold` times in one request as N+1, naming the
@@ -257,9 +278,11 @@ brings, and the agent is compiled for Java 17.
 
 ## Limitations
 
-- Work that leaves the request thread is not followed: async servlet requests (`DeferredResult`, `Callable`),
-  WebFlux and queries run on other threads.
-- `javax.servlet` apps (Spring Boot 2) are not instrumented.
+- Queries a request runs on another thread (`DeferredResult`, `@Async`, `CompletableFuture`) show up as separate tasks
+  rather than as part of the request.
+- Reactive stacks are not covered: WebFlux and Vert.x requests are not recognized, and R2DBC is not JDBC at all.
+- HTTP servers that are not servlet containers, such as the JDK's own `HttpServer` or Netty, are not recognized as
+  requests. Their queries still show up as tasks.
 - `Statement.addBatch(sql)` batches are not recorded. Prepared statement batches are.
 - The call site skips `org.springframework.*` frames, so apps whose own code lives under that package (such as Spring
   PetClinic) show the nearest frame outside it.
@@ -286,7 +309,8 @@ Java 25 toolchain, Gradle 9 with Kotlin DSL (wrapper included), Shadow for the a
 - Unit tests for the normalizer, the analyzer, the options, the JSON writer, the report store and the panel server,
   including SSE and the `Host` check.
 - `AgentInstrumentationTest` installs the agent into the test JVM with ByteBuddyAgent and runs real queries through
-  HikariCP and H2 inside simulated requests.
+  HikariCP and H2 inside simulated `jakarta.servlet` and `javax.servlet` requests, outside any request, and inside an
+  `entry=` method.
 - `CustomerServiceTest` checks that the demo's optimized endpoint returns exactly the same summaries as the naive one.
 - `QueryScopeEndToEndTest` starts the demo shop with `-javaagent:queryscope.jar` as a separate process on free ports
   and checks through the panel API that the naive endpoint is an N+1 at `CustomerSummary.of`, the optimized one runs a

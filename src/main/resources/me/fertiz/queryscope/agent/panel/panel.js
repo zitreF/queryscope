@@ -442,7 +442,7 @@ function hover(event) {
     tooltip.replaceChildren(...[
         el('div', {class: 'tooltip-path'}, `${report.method} ${report.path}`),
         el('div', {class: 'tooltip-meta'}, [
-            `HTTP ${report.status}`,
+            isTask(report) ? 'Task' : `HTTP ${report.status}`,
             formatMs(report.durationMs),
             plural(report.queries.length, 'query', 'queries'),
             `${formatMs(report.view.dbMs)} in database`,
@@ -479,7 +479,7 @@ function renderEndpoints() {
     }
     $('endpoints').replaceChildren(table(
         [
-            {title: 'Endpoint', width: 'auto'},
+            {title: 'Endpoint or task', width: 'auto'},
             {title: 'Calls', width: '70px', number: true},
             {title: 'Queries per call', width: '120px', number: true},
             {title: 'Avg time', width: '90px', number: true},
@@ -570,7 +570,7 @@ function renderRequests() {
     $('no-requests').hidden = visible.length > 0;
     $('no-requests').textContent = state.reports.length > 0
         ? 'No requests with findings yet.'
-        : 'Waiting for HTTP requests that run SQL.';
+        : 'Waiting for requests or tasks that run SQL.';
     const selected = state.reports.find(report => report.id === state.selectedId) ?? null;
     if ((selected?.id ?? null) !== state.renderedId) {
         renderDetails(selected);
@@ -591,7 +591,9 @@ function requestItem(report, index) {
             el('span', {class: 'method'}, report.method),
             el('span', {class: 'path', title: report.path}, report.path)),
         el('div', {class: 'request-meta'},
-            el('span', {class: report.status >= 400 ? 'status-error' : ''}, String(report.status)),
+            isTask(report)
+                ? el('span', {}, 'Task')
+                : el('span', {class: report.status >= 400 ? 'status-error' : ''}, String(report.status)),
             el('span', {}, plural(report.queries.length, 'query', 'queries')),
             el('span', {}, formatMs(report.durationMs)),
             report.findings.map(findingLabel)));
@@ -608,7 +610,7 @@ function renderDetails(report) {
         el('div', {class: 'panel details-header'},
             el('h1', {}, el('span', {class: 'method'}, report.method), report.path),
             el('dl', {class: 'facts'},
-                fact('Status', String(report.status)),
+                isTask(report) ? fact('Kind', 'Task outside HTTP') : fact('Status', String(report.status)),
                 fact('Duration', formatMs(report.durationMs)),
                 fact('Queries', String(report.queries.length)),
                 fact('Time in database', formatMs(report.view.dbMs)),
@@ -742,6 +744,10 @@ function findingLabel(finding) {
     return isNPlusOne(finding)
         ? el('span', {class: 'label n-plus-one'}, `N+1 ×${finding.executions}`)
         : el('span', {class: 'label slow'}, `Slow ${formatMs(finding.durationMs)}`);
+}
+
+function isTask(report) {
+    return report.kind === 'task';
 }
 
 function isNPlusOne(finding) {

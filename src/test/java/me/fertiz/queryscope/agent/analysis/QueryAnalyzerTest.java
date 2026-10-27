@@ -5,6 +5,7 @@ import me.fertiz.queryscope.agent.data.NPlusOne;
 import me.fertiz.queryscope.agent.data.QueryExecution;
 import me.fertiz.queryscope.agent.data.RequestTrace;
 import me.fertiz.queryscope.agent.data.SlowQuery;
+import me.fertiz.queryscope.agent.data.UnitKind;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -80,7 +81,7 @@ class QueryAnalyzerTest {
     }
 
     private List<Finding> analyze(List<QueryExecution> queries) {
-        RequestTrace trace = new RequestTrace(1, "GET", "/orders", 200, Instant.now(), 0, queries);
+        RequestTrace trace = new RequestTrace(1, UnitKind.HTTP, "GET", "/orders", 200, Instant.now(), 0, queries);
         return analyzer.analyze(trace).findings();
     }
 

@@ -31,7 +31,7 @@ public final class QueryScopeAgent {
                 store.add(report);
             }
         });
-        AgentInstaller.install(instrumentation);
+        AgentInstaller.install(instrumentation, config.entryMethods());
         startPanel(config.port(), store);
     }
 

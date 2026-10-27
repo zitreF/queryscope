@@ -40,14 +40,14 @@
             <div class="panel-header">
                 <div>
                     <h2>Live requests</h2>
-                    <p class="panel-hint">One bar per HTTP request, placed where it started. Each tick inside is one SQL query.</p>
+                    <p class="panel-hint">One bar per HTTP request or task, placed where it started. Each tick inside is one SQL query.</p>
                 </div>
                 <div class="segmented" id="window-chips" role="group" aria-label="Time window"></div>
             </div>
             <div class="stream" id="stream">
                 <canvas id="stream-canvas"></canvas>
                 <div class="stream-tooltip" id="stream-tooltip" hidden></div>
-                <p class="stream-empty" id="stream-empty">Use your app. Requests that run SQL appear here as they finish.</p>
+                <p class="stream-empty" id="stream-empty">Use your app. Requests and tasks that run SQL appear here as they finish.</p>
             </div>
             <div class="legend">
                 <span class="ok">No findings</span>
@@ -88,7 +88,7 @@
                     </label>
                 </div>
                 <ol class="request-list" id="request-list"></ol>
-                <p class="placeholder" id="no-requests">Waiting for HTTP requests that run SQL.</p>
+                <p class="placeholder" id="no-requests">Waiting for requests or tasks that run SQL.</p>
             </aside>
             <article class="details" id="details"></article>
         </div>
