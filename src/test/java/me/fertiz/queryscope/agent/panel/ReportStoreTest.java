@@ -23,6 +23,19 @@ class ReportStoreTest {
     }
 
     @Test
+    void keepsRequestsWithoutSqlApartSoTheyNeverPushOutTheOnesWithSql() {
+        store.add(Reports.plain(1, "/a"));
+        store.add(Reports.plain(2, "/b"));
+        store.add(Reports.withoutSql(3, "/status"));
+        store.add(Reports.withoutSql(4, "/status"));
+        store.add(Reports.withoutSql(5, "/status"));
+
+        assertEquals(List.of(5L, 4L, 2L, 1L), store.newestFirst().stream().map(report -> report.trace().id()).toList());
+        assertEquals("/status", store.find(4).orElseThrow().trace().path());
+        assertTrue(store.find(3).isEmpty());
+    }
+
+    @Test
     void notifiesSubscribersUntilTheyUnsubscribe() {
         List<RequestReport> received = new ArrayList<>();
         Runnable unsubscribe = store.subscribe(received::add);

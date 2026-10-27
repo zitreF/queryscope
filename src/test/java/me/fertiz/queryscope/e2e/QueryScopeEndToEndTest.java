@@ -96,6 +96,14 @@ class QueryScopeEndToEndTest {
     }
 
     @Test
+    void keepsRequestsThatRanOnlyJavaCodeForTheCallTree() throws Exception {
+        JsonNode report = requestAndReport("/api/status");
+
+        assertEquals(0, report.path("queries").size());
+        assertEquals(1, report.path("methods").asInt());
+    }
+
+    @Test
     void pointsAtTheMethodThatSpendsItsTimeOutsideSql() throws Exception {
         JsonNode report = requestAndReport("/api/reports/daily-revenue");
 

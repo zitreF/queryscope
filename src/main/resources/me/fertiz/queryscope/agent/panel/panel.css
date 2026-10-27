@@ -184,6 +184,36 @@ body.paused .status::before {
     font-weight: 400;
 }
 
+.subtabs {
+    display: flex;
+    padding: 8px 20px 10px;
+}
+
+.subtab-group {
+    display: flex;
+    gap: 4px;
+}
+
+.subtab {
+    height: 32px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 16px;
+    background: transparent;
+    color: var(--text-2);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.subtab:hover {
+    background: rgba(232, 234, 237, 0.06);
+}
+
+.subtab[aria-selected="true"] {
+    background: var(--blue-bg);
+    color: var(--blue);
+}
+
 main {
     max-width: 1600px;
     margin: 0 auto;
@@ -618,6 +648,17 @@ td.ellipsis {
 
 .details-header {
     padding: 16px 20px;
+}
+
+.details-title {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.details-title .text-button {
+    flex: none;
 }
 
 .details-header h1 {

@@ -19,14 +19,17 @@ const SQL_KEYWORDS = new Set([
 ]);
 
 const FINDING_TYPES = {
-    nPlusOne: {css: 'n-plus-one', name: 'N+1', label: finding => `N+1 ×${finding.executions}`},
-    slowQuery: {css: 'slow', name: 'Slow', label: finding => `Slow ${formatMs(finding.durationMs)}`},
-    repeatedWrite: {css: 'repeated-write', name: 'Writes', label: finding => `Writes ×${finding.executions}`},
-    duplicateQuery: {css: 'duplicate', name: 'Duplicate', label: finding => `Duplicate ×${finding.executions}`},
-    largeResult: {css: 'large-result', name: 'Rows', label: finding => `${formatCount(finding.rows)} rows`},
-    tooManyQueries: {css: 'too-many', name: 'Queries', label: finding => `${finding.queries} queries`},
-    slowMethod: {css: 'slow-method', name: 'Code', label: finding => `Code ${formatMs(finding.ownMs)}`},
+    nPlusOne: {area: 'sql', css: 'n-plus-one', name: 'N+1', label: finding => `N+1 ×${finding.executions}`},
+    slowQuery: {area: 'sql', css: 'slow', name: 'Slow', label: finding => `Slow ${formatMs(finding.durationMs)}`},
+    repeatedWrite: {area: 'sql', css: 'repeated-write', name: 'Writes', label: finding => `Writes ×${finding.executions}`},
+    duplicateQuery: {area: 'sql', css: 'duplicate', name: 'Duplicate', label: finding => `Duplicate ×${finding.executions}`},
+    largeResult: {area: 'sql', css: 'large-result', name: 'Rows', label: finding => `${formatCount(finding.rows)} rows`},
+    tooManyQueries: {area: 'sql', css: 'too-many', name: 'Queries', label: finding => `${finding.queries} queries`},
+    slowMethod: {area: 'java', css: 'slow-method', name: 'Code', label: finding => `Slow code ${formatMs(finding.ownMs)}`},
 };
+const VIEWS = {'sql/live': 'view-live', 'sql/requests': 'view-requests', 'java/calls': 'view-calls'};
+const LEGACY_VIEWS = {live: 'sql/live', requests: 'sql/requests'};
+const HOT_METHODS = 15;
 const QUERY_ROLE_PRIORITY = ['n-plus-one', 'slow', 'repeated-write', 'duplicate', 'large-result'];
 const CALL_INDENT = 18;
 const CALL_EXPAND_SHARE = 0.05;
@@ -34,14 +37,21 @@ const ROLE_ORDER = ['duplicateQuery', 'repeatedWrite', 'largeResult', 'nPlusOne'
 
 const state = {
     reports: [],
+    sqlReports: [],
+    javaReports: [],
     pending: [],
     selectedId: null,
     follow: true,
     onlyFindings: false,
+    callSelectedId: null,
+    callFollow: true,
+    onlySlowCode: false,
+    callRenderedId: undefined,
     connected: false,
     paused: false,
     pausedAt: 0,
-    tab: 'live',
+    view: 'sql/live',
+    lastViews: {sql: 'sql/live', java: 'java/calls'},
     windowMs: WINDOWS[0].ms,
     renderedId: undefined,
     laneEnds: [],
@@ -74,13 +84,20 @@ const streamCanvas = $('stream-canvas');
 const tooltip = $('stream-tooltip');
 
 for (const button of document.querySelectorAll('.tab')) {
-    button.addEventListener('click', () => selectTab(button.dataset.tab));
+    button.addEventListener('click', () => selectView(state.lastViews[button.dataset.area]));
 }
-window.addEventListener('hashchange', () => selectTab(tabFromHash()));
+for (const button of document.querySelectorAll('.subtab')) {
+    button.addEventListener('click', () => selectView(button.dataset.view));
+}
+window.addEventListener('hashchange', () => selectView(viewFromHash()));
 $('pause').addEventListener('click', togglePause);
 $('clear').addEventListener('click', clearAll);
 $('only-findings').addEventListener('change', event => {
     state.onlyFindings = event.target.checked;
+    render();
+});
+$('only-slow-code').addEventListener('change', event => {
+    state.onlySlowCode = event.target.checked;
     render();
 });
 streamCanvas.addEventListener('mousemove', event => hover(event));
@@ -95,7 +112,7 @@ streamCanvas.addEventListener('click', () => {
 });
 
 renderWindowButtons();
-selectTab(tabFromHash());
+selectView(viewFromHash());
 render();
 connect();
 setInterval(tick, 1000);
@@ -110,7 +127,7 @@ function connect() {
         try {
             const response = await fetch('api/requests');
             const stored = (await response.json()).map(enrich);
-            state.reports = newestUnique([...buffered.reverse(), ...stored]);
+            setReports([...buffered.reverse(), ...stored]);
             state.reports.forEach(report => report.findings.forEach(finding => state.announced.add(findingKey(report, finding))));
             relayoutLanes();
             render();
@@ -136,16 +153,23 @@ function connect() {
 }
 
 function add(report) {
-    state.reports = newestUnique([report, ...state.reports]);
-    assignLane(report);
+    setReports([report, ...state.reports]);
+    if (report.view.hasSql) {
+        assignLane(report);
+    }
     announce(report);
     render();
 }
 
 function enrich(report) {
     const start = parseInstant(report.startedAt);
-    const types = new Set(report.findings.map(finding => finding.type));
+    const sqlFindings = report.findings.filter(finding => findingArea(finding) === 'sql');
+    const javaFindings = report.findings.filter(finding => findingArea(finding) === 'java');
+    const types = new Set(sqlFindings.map(finding => finding.type));
     report.view = {
+        hasSql: report.queries.length > 0,
+        sqlFindings,
+        javaFindings,
         start,
         end: start + report.durationMs,
         dbMs: report.queries.reduce((sum, query) => sum + query.durationMs, 0),
@@ -157,11 +181,24 @@ function enrich(report) {
     return report;
 }
 
+function setReports(reports) {
+    state.reports = newestUnique(reports);
+    state.sqlReports = state.reports.filter(report => report.view.hasSql);
+    state.javaReports = state.reports.filter(report => report.methods > 0);
+}
+
 function newestUnique(reports) {
     const seen = new Set();
-    return reports
-        .filter(report => !seen.has(report.id) && seen.add(report.id))
-        .slice(0, MAX_REPORTS);
+    const kept = {sql: 0, java: 0};
+    return reports.filter(report => {
+        if (seen.has(report.id)) {
+            return false;
+        }
+        seen.add(report.id);
+        const pool = report.view.hasSql ? 'sql' : 'java';
+        kept[pool]++;
+        return kept[pool] <= MAX_REPORTS;
+    });
 }
 
 function now() {
@@ -201,45 +238,74 @@ function updatePauseButton() {
 
 async function clearAll() {
     await fetch('api/requests', {method: 'DELETE'});
-    state.reports = [];
+    setReports([]);
     state.pending = [];
     state.selectedId = null;
     state.follow = true;
+    state.callSelectedId = null;
+    state.callFollow = true;
     state.laneEnds = [];
     updatePauseButton();
     render();
 }
 
-function tabFromHash() {
-    return location.hash === '#requests' ? 'requests' : 'live';
+function viewFromHash() {
+    const hash = location.hash.slice(1);
+    return VIEWS[hash] ? hash : LEGACY_VIEWS[hash] ?? 'sql/live';
 }
 
-function selectTab(tab) {
-    state.tab = tab;
+function selectView(view) {
+    const area = view.split('/')[0];
+    state.view = view;
+    state.lastViews[area] = view;
     for (const button of document.querySelectorAll('.tab')) {
-        button.setAttribute('aria-selected', String(button.dataset.tab === tab));
+        button.setAttribute('aria-selected', String(button.dataset.area === area));
     }
-    $('view-live').hidden = tab !== 'live';
-    $('view-requests').hidden = tab !== 'requests';
-    if (location.hash !== `#${tab}`) {
-        history.replaceState(null, '', `#${tab}`);
+    for (const group of document.querySelectorAll('.subtab-group')) {
+        group.hidden = group.dataset.area !== area;
+    }
+    for (const button of document.querySelectorAll('.subtab')) {
+        button.setAttribute('aria-selected', String(button.dataset.view === view));
+    }
+    for (const [key, id] of Object.entries(VIEWS)) {
+        $(id).hidden = key !== view;
+    }
+    if (location.hash !== `#${view}`) {
+        history.replaceState(null, '', `#${view}`);
     }
 }
 
 function openRequest(id) {
     state.selectedId = id;
     state.follow = false;
-    selectTab('requests');
+    selectView('sql/requests');
     render();
 }
 
+function openCalls(id) {
+    state.callSelectedId = id;
+    state.callFollow = false;
+    selectView('java/calls');
+    render();
+}
+
+function openFinding(report, finding) {
+    if (findingArea(finding) === 'java') {
+        openCalls(report.id);
+    } else {
+        openRequest(report.id);
+    }
+}
+
 function render() {
-    $('request-count').textContent = String(state.reports.length);
-    $('stream-empty').hidden = state.reports.length > 0;
+    $('request-count').textContent = String(state.sqlReports.length);
+    $('call-count').textContent = String(state.javaReports.length);
+    $('stream-empty').hidden = state.sqlReports.length > 0;
     renderStats();
     renderEndpoints();
     renderFeed();
     renderRequests();
+    renderCalls();
 }
 
 function tick() {
@@ -251,7 +317,7 @@ function tick() {
 }
 
 function frame() {
-    if (state.tab === 'live') {
+    if (state.view === 'sql/live') {
         drawStream();
     }
     requestAnimationFrame(frame);
@@ -260,17 +326,17 @@ function frame() {
 function renderStats() {
     const end = now();
     const from = end - KPI_WINDOW_MS;
-    const recent = state.reports.filter(report => report.view.end > from && report.view.end <= end);
+    const recent = state.sqlReports.filter(report => report.view.end > from && report.view.end <= end);
     const queries = recent.reduce((sum, report) => sum + report.queries.length, 0);
     const duration = recent.reduce((sum, report) => sum + report.durationMs, 0);
     const db = recent.reduce((sum, report) => sum + report.view.dbMs, 0);
-    const withNPlusOne = state.reports.filter(report => report.view.types.has('nPlusOne'));
-    const withSlow = state.reports.filter(report => report.view.types.has('slowQuery'));
+    const withNPlusOne = state.sqlReports.filter(report => report.view.types.has('nPlusOne'));
+    const withSlow = state.sqlReports.filter(report => report.view.types.has('slowQuery'));
     const dbSeries = series(end, report => report.view.dbMs);
     const durationSeries = series(end, report => report.durationMs);
     const stats = [
         {key: 'requests', label: 'Requests per minute', value: recent.length,
-            sub: `${plural(state.reports.length, 'request', 'requests')} kept`, series: series(end, () => 1)},
+            sub: `${plural(state.sqlReports.length, 'request', 'requests')} kept`, series: series(end, () => 1)},
         {key: 'queries', label: 'Queries per minute', value: queries,
             sub: recent.length > 0 ? `${(queries / recent.length).toFixed(1)} per request` : 'No requests in the last minute',
             series: series(end, report => report.queries.length)},
@@ -310,7 +376,7 @@ function series(end, valueOf) {
     const size = KPI_WINDOW_MS / SPARK_BUCKETS;
     const from = end - KPI_WINDOW_MS;
     const values = new Array(SPARK_BUCKETS).fill(0);
-    for (const report of state.reports) {
+    for (const report of state.sqlReports) {
         const index = Math.floor((report.view.end - from) / size);
         if (index >= 0 && index < SPARK_BUCKETS) {
             values[index] += valueOf(report);
@@ -367,7 +433,7 @@ function barWidth(report, width) {
 
 function relayoutLanes() {
     state.laneEnds = [];
-    [...state.reports].sort((a, b) => a.view.start - b.view.start).forEach(assignLane);
+    [...state.sqlReports].sort((a, b) => a.view.start - b.view.start).forEach(assignLane);
 }
 
 function assignLane(report) {
@@ -407,7 +473,7 @@ function drawStream() {
     }
 
     const hits = [];
-    for (const report of [...state.reports].reverse()) {
+    for (const report of [...state.sqlReports].reverse()) {
         if (report.view.start > end) {
             continue;
         }
@@ -462,7 +528,9 @@ function hover(event) {
             plural(report.queries.length, 'query', 'queries'),
             `${formatMs(report.view.dbMs)} in database`,
         ].join(' · ')),
-        report.findings.length > 0 ? el('div', {class: 'tooltip-meta'}, report.findings.map(findingLabel)) : null,
+        report.view.sqlFindings.length > 0
+            ? el('div', {class: 'tooltip-meta'}, report.view.sqlFindings.map(findingLabel))
+            : null,
     ].filter(Boolean));
     tooltip.hidden = false;
     const left = Math.min(mouseX + 14, bounds.width - tooltip.offsetWidth - 8);
@@ -473,7 +541,7 @@ function hover(event) {
 
 function renderEndpoints() {
     const groups = new Map();
-    for (const report of state.reports) {
+    for (const report of state.sqlReports) {
         const key = `${report.method} ${report.view.endpointPath}`;
         const group = groups.get(key) ?? {
             method: report.method, path: report.view.endpointPath, latestId: report.id,
@@ -513,8 +581,8 @@ function renderEndpoints() {
 
 function renderFeed() {
     const items = [];
-    for (const report of state.reports) {
-        for (const finding of report.findings) {
+    for (const report of state.sqlReports) {
+        for (const finding of report.view.sqlFindings) {
             items.push({report, finding});
         }
         if (items.length >= FEED_SIZE) {
@@ -565,7 +633,7 @@ function announce(report) {
         `New finding: ${findingText(finding)} in ${report.method} ${report.view.endpointPath}`;
     $('snackbar-action').onclick = () => {
         snackbar.hidden = true;
-        openRequest(report.id);
+        openFinding(report, finding);
     };
     snackbar.hidden = false;
     clearTimeout(state.snackTimer);
@@ -573,16 +641,16 @@ function announce(report) {
 }
 
 function renderRequests() {
-    const visible = state.reports.filter(report => !state.onlyFindings || report.findings.length > 0);
+    const visible = state.sqlReports.filter(report => !state.onlyFindings || report.view.sqlFindings.length > 0);
     if (state.follow || !visible.some(report => report.id === state.selectedId)) {
         state.selectedId = visible.length > 0 ? visible[0].id : null;
     }
     $('request-list').replaceChildren(...visible.map((report, index) => requestItem(report, index)));
     $('no-requests').hidden = visible.length > 0;
-    $('no-requests').textContent = state.reports.length > 0
+    $('no-requests').textContent = state.sqlReports.length > 0
         ? 'No requests with findings yet.'
         : 'Waiting for requests or tasks that run SQL.';
-    const selected = state.reports.find(report => report.id === state.selectedId) ?? null;
+    const selected = state.sqlReports.find(report => report.id === state.selectedId) ?? null;
     if ((selected?.id ?? null) !== state.renderedId) {
         renderDetails(selected);
         state.renderedId = selected?.id ?? null;
@@ -607,7 +675,7 @@ function requestItem(report, index) {
                 : el('span', {class: report.status >= 400 ? 'status-error' : ''}, String(report.status)),
             el('span', {}, plural(report.queries.length, 'query', 'queries')),
             el('span', {}, formatMs(report.durationMs)),
-            report.findings.map(findingLabel)));
+            report.view.sqlFindings.map(findingLabel)));
 }
 
 function renderDetails(report) {
@@ -619,7 +687,12 @@ function renderDetails(report) {
     const roles = queryRoles(report);
     $('details').replaceChildren(
         el('div', {class: 'panel details-header'},
-            el('h1', {}, el('span', {class: 'method'}, report.method), report.path),
+            el('div', {class: 'details-title'},
+                el('h1', {}, el('span', {class: 'method'}, report.method), report.path),
+                report.methods > 0
+                    ? el('button', {type: 'button', class: 'text-button', onclick: () => openCalls(report.id)},
+                        'Call tree')
+                    : null),
             el('dl', {class: 'facts'},
                 isTask(report) ? fact('Kind', 'Task outside HTTP') : fact('Status', String(report.status)),
                 fact('Duration', formatMs(report.durationMs)),
@@ -627,19 +700,96 @@ function renderDetails(report) {
                 fact('Time in database', formatMs(report.view.dbMs)),
                 fact('Started', new Date(report.view.start).toLocaleTimeString()))),
         el('h3', {class: 'section-title'}, 'Findings'),
-        ...findingCards(report),
-        el('h3', {class: 'section-title'}, 'Call tree'),
-        el('div', {class: 'panel call-tree', id: 'call-tree', 'data-id': report.id},
-            el('p', {class: 'empty', style: {paddingTop: '20px'}}, 'Loading the call tree…')),
+        ...findingCards(report.view.sqlFindings, 'No SQL findings in this request.'),
         el('h3', {class: 'section-title'}, 'Timeline'),
         timeline(report, roles),
         el('h3', {class: 'section-title'}, 'Queries'),
         queryTable(report, roles));
-    state.callToggles = new Map();
-    loadCallTree(report, roles);
 }
 
-async function loadCallTree(report, roles) {
+function renderCalls() {
+    const visible = state.javaReports.filter(report => !state.onlySlowCode || report.view.javaFindings.length > 0);
+    if (state.callFollow || !visible.some(report => report.id === state.callSelectedId)) {
+        state.callSelectedId = visible.length > 0 ? visible[0].id : null;
+    }
+    $('call-list').replaceChildren(...visible.map((report, index) => callItem(report, index)));
+    $('no-calls').hidden = visible.length > 0;
+    $('no-calls').textContent = state.javaReports.length > 0
+        ? 'No requests with slow code yet.'
+        : 'Waiting for requests or tasks that run your code.';
+    const selected = state.javaReports.find(report => report.id === state.callSelectedId) ?? null;
+    if ((selected?.id ?? null) !== state.callRenderedId) {
+        renderCallDetails(selected);
+        state.callRenderedId = selected?.id ?? null;
+    }
+}
+
+function callItem(report, index) {
+    return el('li', {
+            class: `request${report.id === state.callSelectedId ? ' selected' : ''}`,
+            onclick: () => {
+                state.callSelectedId = report.id;
+                state.callFollow = index === 0;
+                render();
+            },
+        },
+        el('div', {class: 'request-line'},
+            el('span', {class: 'method'}, report.method),
+            el('span', {class: 'path', title: report.path}, report.path)),
+        el('div', {class: 'request-meta'},
+            isTask(report)
+                ? el('span', {}, 'Task')
+                : el('span', {class: report.status >= 400 ? 'status-error' : ''}, String(report.status)),
+            el('span', {}, formatMs(report.durationMs)),
+            el('span', {}, plural(report.methods, 'method', 'methods')),
+            report.view.javaFindings.map(findingLabel)));
+}
+
+function renderCallDetails(report) {
+    if (!report) {
+        $('call-details').replaceChildren(el('div', {class: 'panel'},
+            el('p', {class: 'empty', style: {paddingTop: '20px'}}, 'Select a request to see its call tree.')));
+        return;
+    }
+    $('call-details').replaceChildren(
+        el('div', {class: 'panel details-header'},
+            el('div', {class: 'details-title'},
+                el('h1', {}, el('span', {class: 'method'}, report.method), report.path),
+                report.view.hasSql
+                    ? el('button', {type: 'button', class: 'text-button', onclick: () => openRequest(report.id)},
+                        'SQL queries')
+                    : null),
+            el('dl', {class: 'facts', id: 'call-facts'}, callFacts(report, null))),
+        el('h3', {class: 'section-title'}, 'Findings'),
+        ...findingCards(report.view.javaFindings, 'No slow code in this request.'),
+        el('h3', {class: 'section-title'}, 'Call tree'),
+        el('div', {class: 'panel call-tree', id: 'call-tree', 'data-id': report.id},
+            el('p', {class: 'empty', style: {paddingTop: '20px'}}, 'Loading the call tree…')),
+        el('h3', {class: 'section-title', id: 'method-queries-title'}, 'Queries of a method'),
+        el('div', {class: 'panel', id: 'method-queries'},
+            el('p', {class: 'empty', style: {paddingTop: '20px'}}, report.view.hasSql
+                ? 'Select a method with queries in the call tree to see its SQL here.'
+                : 'This request ran no SQL.')),
+        el('h3', {class: 'section-title'}, 'Methods by self time'),
+        el('div', {class: 'panel', id: 'hot-methods'},
+            el('p', {class: 'empty', style: {paddingTop: '20px'}}, 'Loading…')));
+    state.callToggles = new Map();
+    loadCallTree(report);
+}
+
+function callFacts(report, tree) {
+    const ownMs = tree && tree.methods ? tree.methods.reduce((sum, node) => sum + node.totalMs, 0) : null;
+    return [
+        isTask(report) ? fact('Kind', 'Task outside HTTP') : fact('Status', String(report.status)),
+        fact('Duration', formatMs(report.durationMs)),
+        fact('In your code', ownMs === null ? '…' : formatMs(Math.min(ownMs, report.durationMs))),
+        fact('In SQL', formatMs(report.view.dbMs)),
+        fact('Methods', String(report.methods)),
+        fact('Started', new Date(report.view.start).toLocaleTimeString()),
+    ];
+}
+
+async function loadCallTree(report) {
     let tree = state.callTrees.get(report.id);
     if (!tree) {
         try {
@@ -653,7 +803,18 @@ async function loadCallTree(report, roles) {
             tree = {failed: true};
         }
     }
+    const container = $('call-tree');
+    if (!container || container.dataset.id !== String(report.id)) {
+        return;
+    }
+    const roles = queryRoles(report);
     renderCallTree(report, tree, roles);
+    if (tree.methods) {
+        $('call-facts').replaceChildren(...callFacts(report, tree));
+        renderHotMethods(report, tree);
+    } else {
+        $('hot-methods').replaceChildren(el('p', {class: 'empty', style: {paddingTop: '20px'}}, '—'));
+    }
 }
 
 function renderCallTree(report, tree, roles) {
@@ -740,7 +901,7 @@ function callRow(node, depth, path, context) {
         : el('code', {title: node.method}, shortMethod(node.method));
     const properties = {class: ['call-row', queries > 0 ? 'clickable' : '', slow ? 'slow-method' : ''].join(' ')};
     if (queries > 0) {
-        properties.onclick = () => highlightQueries(node.queryIndexes);
+        properties.onclick = () => showMethodQueries(context.report, node, context.roles);
     }
     return el('tr', properties,
         el('td', {style: {paddingLeft: `${20 + depth * CALL_INDENT}px`}}, el('div', {class: 'call-name'},
@@ -768,13 +929,76 @@ function callRow(node, depth, path, context) {
             class: 'number',
             title: node.method === null ? 'Time outside your methods: the framework, the server and the database driver' : '',
         }, formatMs(node.selfMs)),
-        el('td', {class: 'number', title: queries > 0 ? 'Click to highlight these queries below' : ''},
+        el('td', {class: 'number', title: queries > 0 ? 'Click the row to see these queries below' : ''},
             queries > 0 ? el('span', {class: `call-queries ${role ?? ''}`}, String(queries)) : '—'),
         el('td', {},
             el('div', {class: 'call-share', title: `${wholePercent(node.totalMs / context.duration)} in total, `
                     + `${wholePercent(node.selfMs / context.duration)} in its own code`},
                 el('div', {class: 'call-share-total', style: {width: percent(node.totalMs / context.duration)}}),
                 el('div', {class: 'call-share-self', style: {width: percent(node.selfMs / context.duration)}}))));
+}
+
+function showMethodQueries(report, node, roles) {
+    const title = node.method === null ? 'outside your methods' : shortMethod(node.method);
+    $('method-queries-title').textContent = `Queries of ${title}`;
+    const rows = node.queryIndexes.map(index => {
+        const query = report.queries[index];
+        return el('tr', {class: roles[index]},
+            el('td', {class: 'number'}, String(index + 1)),
+            el('td', {class: 'number'}, formatMs(query.durationMs)),
+            el('td', {class: 'number'}, query.rows === null || query.rows === undefined ? '—' : formatCount(query.rows)),
+            el('td', {class: 'sql', title: oneLine(query.sql)},
+                query.failed ? el('span', {class: 'status-error'}, 'Failed ') : null, highlightSql(oneLine(query.sql))),
+            el('td', {class: 'params', title: query.parameters || ''}, query.parameters || '—'));
+    });
+    const queries = table(
+        [
+            {title: '#', width: '52px', number: true},
+            {title: 'Duration', width: '90px', number: true},
+            {title: 'Rows', width: '76px', number: true},
+            {title: 'SQL', width: 'auto'},
+            {title: 'Parameters', width: '18%'},
+        ],
+        rows);
+    queries.classList.add('query-table');
+    $('method-queries').replaceChildren(queries);
+    $('method-queries-title').scrollIntoView({block: 'start', behavior: 'smooth'});
+}
+
+function renderHotMethods(report, tree) {
+    const methods = new Map();
+    const collect = nodes => nodes.forEach(node => {
+        const entry = methods.get(node.method) ?? {method: node.method, calls: 0, selfMs: 0, queries: 0};
+        entry.calls += node.calls;
+        entry.selfMs += node.startedBeforeUnit ? 0 : node.selfMs;
+        entry.queries += node.queryIndexes.length;
+        methods.set(node.method, entry);
+        collect(node.children);
+    });
+    collect(tree.methods);
+    const duration = Math.max(report.durationMs, 0.001);
+    const slow = new Set(report.view.javaFindings.map(finding => finding.method));
+    const top = [...methods.values()].sort((a, b) => b.selfMs - a.selfMs).slice(0, HOT_METHODS);
+    const hot = table(
+        [
+            {title: 'Method', width: 'auto'},
+            {title: 'Calls', width: '80px', number: true},
+            {title: 'Self', width: '90px', number: true},
+            {title: 'Queries', width: '80px', number: true},
+            {title: 'Share of time', width: '18%'},
+        ],
+        top.map(entry => el('tr', {class: slow.has(entry.method) ? 'slow-method' : ''},
+            el('td', {}, el('div', {class: 'call-name'},
+                el('code', {title: entry.method}, shortMethod(entry.method)),
+                slow.has(entry.method) ? el('span', {class: 'label slow-method'}, 'Slow code') : null)),
+            el('td', {class: 'number'}, formatCount(entry.calls)),
+            el('td', {class: 'number'}, formatMs(entry.selfMs)),
+            el('td', {class: 'number'}, entry.queries > 0 ? String(entry.queries) : '—'),
+            el('td', {},
+                el('div', {class: 'call-share', title: `${wholePercent(entry.selfMs / duration)} of the time`},
+                    el('div', {class: 'call-share-self', style: {width: percent(entry.selfMs / duration)}}))))));
+    hot.classList.add('call-table');
+    $('hot-methods').replaceChildren(hot);
 }
 
 function isExpanded(node, depth, path, context) {
@@ -804,9 +1028,9 @@ function fact(term, value) {
     return el('div', {}, el('dt', {}, term), el('dd', {}, value));
 }
 
-function findingCards(report) {
-    if (report.findings.length === 0) {
-        return [el('div', {class: 'finding clean'}, 'No findings in this request.')];
+function findingCards(findings, emptyText) {
+    if (findings.length === 0) {
+        return [el('div', {class: 'finding clean'}, emptyText)];
     }
     const cards = {
         nPlusOne: nPlusOneCard,
@@ -817,7 +1041,7 @@ function findingCards(report) {
         tooManyQueries: tooManyQueriesCard,
         slowMethod: slowMethodCard,
     };
-    return report.findings.filter(finding => cards[finding.type]).map(finding => cards[finding.type](finding));
+    return findings.filter(finding => cards[finding.type]).map(finding => cards[finding.type](finding));
 }
 
 function nPlusOneCard(finding) {
@@ -886,6 +1110,10 @@ function slowMethodCard(finding) {
         el('div', {class: 'finding-hint'},
             'The time goes to Java, not to the database: this method and the library code it calls. Look for loops that '
             + 'build strings, heavy mapping or serialization, and blocking calls. The call tree below shows where.'));
+}
+
+function findingArea(finding) {
+    return FINDING_TYPES[finding.type]?.area ?? 'sql';
 }
 
 function callSiteLine(callSite) {

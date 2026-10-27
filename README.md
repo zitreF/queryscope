@@ -13,7 +13,7 @@
   <img alt="No dependencies in your app" src="https://img.shields.io/badge/dependencies%20in%20your%20app-none-2EA44F">
 </p>
 
-![QueryScope Live tab with requests streaming in](docs/panel.png)
+![QueryScope SQL Live view with requests streaming in](docs/panel.png)
 
 ```bash
 java -jar queryscope.jar your-app.jar
@@ -31,18 +31,21 @@ That is the whole setup: QueryScope starts your app with the agent attached. Ope
 - **More checks.** Unbatched writes (the same INSERT, UPDATE or DELETE repeated in one request), duplicate queries
   (the same SELECT with the same bound parameters run twice), large results (a query that returns 500 rows or more)
   and requests that simply run too many queries. Every query shows its parameters and the rows it returned.
-- **Live tracking.** Keep the app running and use it: the Live tab draws every request on a moving time axis, with
-  one tick per SQL query, N+1 requests in red and slow ones in yellow. Below are live counters, a table of endpoints
-  by time spent in the database and the latest findings. A short notice appears whenever a new problem shows up.
+- **Two areas.** The panel has an SQL tab for queries and a Java tab for your code, and a request found in one
+  opens in the other with one click.
+- **Live tracking.** Keep the app running and use it: the SQL tab's Live view draws every request on a moving time
+  axis, with one tick per SQL query, N+1 requests in red and slow ones in yellow. Below are live counters, a table of
+  endpoints by time spent in the database and the latest findings. A short notice appears whenever a new problem
+  shows up.
 - **Session summary.** When the app stops, QueryScope prints every endpoint and task with its calls, queries per
   call, average time and time in the database, followed by the findings that came up most often. IDs in paths are
   folded, so `/api/customers/7` and `/api/customers/8` count as `GET /api/customers/{id}`.
-- **Request details.** The Requests tab shows each request's findings, its queries on a timeline and the full SQL with
-  syntax highlighting.
-- **Call tree.** Each request and task also gets a tree of your own methods: calls, total and self time, and the
-  queries every method ran, so an N+1 points at the method that loops and a click on it highlights its queries. A
-  method that spends too long in Java rather than in SQL is reported as slow code. Your package is taken from the main
-  class, or set with `package=`.
+- **Request details.** The SQL tab's Requests view shows each request's findings, its queries on a timeline and the
+  full SQL with syntax highlighting.
+- **Call tree.** The Java tab shows a tree of your own methods for every request and task, also the ones that ran
+  no SQL: calls, total and self time, and the queries each method ran, so an N+1 points at the method that loops and a
+  click on it lists its SQL. A table ranks the methods by self time, and a method that spends too long in Java rather
+  than in SQL is reported as slow code. Your package is taken from the main class, or set with `package=`.
 - **Any data access code.** Works under Hibernate, Spring Data JPA, `JdbcClient`, `JdbcTemplate` or plain JDBC, with
   any driver and connection pool.
 - **Not only HTTP.** Queries that run outside a request, in scheduled jobs, message listeners or a plain `main`, are
@@ -117,10 +120,15 @@ customer.
 curl http://localhost:8080/api/customers/naive
 ```
 
-**2. See what QueryScope found.** The request appears in the Live tab as a red bar, and the Requests tab shows
-it with an `N+1 ×40` badge, the 40 repeated queries red on its timeline, and the line that runs them:
+**2. See what QueryScope found.** The request appears in the SQL tab's Live view as a red bar, and its Requests
+view shows it with an `N+1 ×40` badge, the 40 repeated queries red on its timeline, and the line that runs them:
 
-![QueryScope Requests tab with the N+1 request opened](docs/panel-n-plus-one.png)
+![QueryScope SQL requests view with the N+1 request opened](docs/panel-n-plus-one.png)
+
+**Call tree** opens the same request in the Java tab, where the 40 queries sit on `CustomerSummary.of`, called once
+per customer from `CustomerService.summariesNaive`:
+
+![QueryScope Java call tree of the N+1 request](docs/panel-call-tree.png)
 
 The same goes to the app's own log:
 
@@ -228,20 +236,20 @@ QueryScope needs Java 17 or newer and works with any Java app that talks to its 
   call is one task, however many connections it uses.
 
 The end-to-end tests run the demo on Spring Boot 4.1 with Tomcat, HikariCP and H2, and a plain `main` program on bare
-JDBC, and `javax.servlet` is covered by in-process tests. QueryScope is a development tool that keeps the SQL of the last 200 requests and tasks
-in memory, together with their bound parameters (strings cut at 64 characters, binary values shown as their size),
-so don't attach it in production.
+JDBC, and `javax.servlet` is covered by in-process tests. QueryScope is a development tool that keeps the SQL and
+call trees of the last requests and tasks in memory, together with their bound parameters (strings cut at 64
+characters, binary values shown as their size), so don't attach it in production.
 
 ## Using the results in scripts and tests
 
 The panel is backed by a small JSON API on the same port:
 
-| Endpoint                       | Returns                                                                     |
-|--------------------------------|-----------------------------------------------------------------------------|
-| `GET /api/requests`            | the last 200 requests that ran SQL, newest first, with queries and findings |
-| `DELETE /api/requests`         | clears them                                                                 |
-| `GET /api/events`              | a server-sent events stream with one `request` event per finished request   |
-| `GET /api/requests/{id}/calls` | the call tree of one stored request, with the queries of each method        |
+| Endpoint                       | Returns                                                                                                              |
+|--------------------------------|----------------------------------------------------------------------------------------------------------------------|
+| `GET /api/requests`            | the last 200 requests that ran SQL and the last 200 that only ran your code, newest first, with queries and findings |
+| `DELETE /api/requests`         | clears them                                                                                                          |
+| `GET /api/events`              | a server-sent events stream with one `request` event per finished request                                            |
+| `GET /api/requests/{id}/calls` | the call tree of one stored request, with the queries of each method                                                 |
 
 For example, after clicking through the demo, list the requests that have a finding:
 

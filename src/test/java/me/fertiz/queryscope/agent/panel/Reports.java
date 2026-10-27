@@ -22,6 +22,11 @@ final class Reports {
         return new RequestReport(new RequestTrace(id, UnitKind.HTTP, "GET", path, 200, STARTED_AT, 2_000_000, List.of(query)), List.of());
     }
 
+    static RequestReport withoutSql(long id, String path) {
+        return new RequestReport(new RequestTrace(id, UnitKind.HTTP, "GET", path, 200, STARTED_AT, 1_000_000, List.of()),
+                List.of());
+    }
+
     static RequestReport withFindings() {
         QueryExecution first = new QueryExecution("select * from orders where customer_id = 1", "", 1_000_000,
                 500_000, 3, "com.acme.Mapper.toDto(Mapper.java:7)", false);

@@ -10,4 +10,12 @@ public record CallTree(List<CallNode> calls, List<Integer> outsideQueryIndexes, 
         calls = List.copyOf(calls);
         outsideQueryIndexes = List.copyOf(outsideQueryIndexes);
     }
+
+    public int methods() {
+        return count(calls);
+    }
+
+    private static int count(List<CallNode> nodes) {
+        return nodes.stream().mapToInt(node -> 1 + count(node.children())).sum();
+    }
 }

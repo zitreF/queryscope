@@ -66,7 +66,9 @@ final class ReportJson {
         trace.queries().forEach(query -> write(json, query));
         json.endArray().name("findings").beginArray();
         report.findings().forEach(finding -> write(json, finding));
-        json.endArray().endObject();
+        json.endArray()
+                .name("methods").value(trace.callTree().methods())
+                .endObject();
     }
 
     private static void write(JsonWriter json, QueryExecution query) {

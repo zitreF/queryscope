@@ -24,16 +24,27 @@
             <button type="button" class="text-button" id="clear">Clear</button>
         </div>
     </div>
-    <nav class="tabs" role="tablist" aria-label="Views">
-        <button type="button" class="tab" role="tab" data-tab="live" id="tab-live" aria-controls="view-live">Live</button>
-        <button type="button" class="tab" role="tab" data-tab="requests" id="tab-requests" aria-controls="view-requests">
-            Requests <span class="tab-count" id="request-count">0</span>
-        </button>
+    <nav class="tabs" role="tablist" aria-label="Areas">
+        <button type="button" class="tab" role="tab" data-area="sql" id="tab-sql">SQL</button>
+        <button type="button" class="tab" role="tab" data-area="java" id="tab-java">Java</button>
+    </nav>
+    <nav class="subtabs" aria-label="Views">
+        <div class="subtab-group" data-area="sql">
+            <button type="button" class="subtab" data-view="sql/live" aria-controls="view-live">Live</button>
+            <button type="button" class="subtab" data-view="sql/requests" aria-controls="view-requests">
+                Requests <span class="tab-count" id="request-count">0</span>
+            </button>
+        </div>
+        <div class="subtab-group" data-area="java" hidden>
+            <button type="button" class="subtab" data-view="java/calls" aria-controls="view-calls">
+                Call trees <span class="tab-count" id="call-count">0</span>
+            </button>
+        </div>
     </nav>
 </header>
 
 <main>
-    <section class="view" id="view-live" role="tabpanel" aria-labelledby="tab-live">
+    <section class="view" id="view-live" role="tabpanel">
         <div class="stats" id="kpis"></div>
 
         <section class="panel">
@@ -79,7 +90,7 @@
         </div>
     </section>
 
-    <section class="view" id="view-requests" role="tabpanel" aria-labelledby="tab-requests" hidden>
+    <section class="view" id="view-requests" role="tabpanel" hidden>
         <div class="master-detail">
             <aside class="panel request-panel" aria-label="Requests">
                 <div class="list-toolbar">
@@ -92,6 +103,22 @@
                 <p class="placeholder" id="no-requests">Waiting for requests or tasks that run SQL.</p>
             </aside>
             <article class="details" id="details"></article>
+        </div>
+    </section>
+
+    <section class="view" id="view-calls" role="tabpanel" hidden>
+        <div class="master-detail">
+            <aside class="panel request-panel" aria-label="Requests and tasks with a call tree">
+                <div class="list-toolbar">
+                    <label class="checkbox">
+                        <input type="checkbox" id="only-slow-code">
+                        Only requests with slow code
+                    </label>
+                </div>
+                <ol class="request-list" id="call-list"></ol>
+                <p class="placeholder" id="no-calls">Waiting for requests or tasks that run your code.</p>
+            </aside>
+            <article class="details" id="call-details"></article>
         </div>
     </section>
 </main>

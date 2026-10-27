@@ -32,7 +32,8 @@ class ReportJsonTest {
                 + "\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"executions\":2,\"totalMs\":120.500,"
                 + "\"queryIndexes\":[0,1]},"
                 + "{\"type\":\"slowQuery\",\"sql\":\"select * from orders where customer_id = ?\","
-                + "\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"durationMs\":120.000,\"queryIndex\":1}]}";
+                + "\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"durationMs\":120.000,\"queryIndex\":1}],"
+                + "\"methods\":0}";
 
         assertEquals(expected, ReportJson.of(Reports.withFindings()));
     }
@@ -43,10 +44,12 @@ class ReportJsonTest {
 
         assertEquals("[{\"id\":2,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/b\",\"status\":200,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":2.000,\"queries\":[{\"sql\":\"select 1\","
-                + "\"parameters\":\"\",\"offsetMs\":0.500,\"durationMs\":0.250,\"rows\":1,\"callSite\":null,\"failed\":false}],\"findings\":[]},"
+                + "\"parameters\":\"\",\"offsetMs\":0.500,\"durationMs\":0.250,\"rows\":1,\"callSite\":null,\"failed\":false}],"
+                + "\"findings\":[],\"methods\":0},"
                 + "{\"id\":1,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/a\",\"status\":200,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":2.000,\"queries\":[{\"sql\":\"select 1\","
-                + "\"parameters\":\"\",\"offsetMs\":0.500,\"durationMs\":0.250,\"rows\":1,\"callSite\":null,\"failed\":false}],\"findings\":[]}]", json);
+                + "\"parameters\":\"\",\"offsetMs\":0.500,\"durationMs\":0.250,\"rows\":1,\"callSite\":null,\"failed\":false}],"
+                + "\"findings\":[],\"methods\":0}]", json);
     }
 
     @Test

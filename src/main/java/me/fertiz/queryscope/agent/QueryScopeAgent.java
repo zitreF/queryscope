@@ -32,12 +32,15 @@ public final class QueryScopeAgent {
         ReportStore store = new ReportStore(STORED_REQUESTS);
         SessionSummary summary = new SessionSummary(Clock.systemUTC());
         RequestTracer.publishTo(trace -> {
-            if (!trace.queries().isEmpty()) {
-                RequestReport report = analyzer.analyze(trace);
-                console.accept(report);
-                store.add(report);
-                summary.accept(report);
+            if (trace.queries().isEmpty() && trace.callTree().calls().isEmpty()) {
+                return;
             }
+            RequestReport report = analyzer.analyze(trace);
+            if (!trace.queries().isEmpty() || !report.findings().isEmpty()) {
+                console.accept(report);
+            }
+            store.add(report);
+            summary.accept(report);
         });
         AppPackages profiled = profiledPackages(config);
         AgentInstaller.install(instrumentation, config.entryMethods(), profiled);
