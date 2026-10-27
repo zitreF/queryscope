@@ -1,11 +1,14 @@
 package me.fertiz.queryscope.agent.panel;
 
+import me.fertiz.queryscope.agent.data.CallNode;
+import me.fertiz.queryscope.agent.data.CallTree;
 import me.fertiz.queryscope.agent.data.DuplicateQuery;
 import me.fertiz.queryscope.agent.data.LargeResult;
 import me.fertiz.queryscope.agent.data.QueryExecution;
 import me.fertiz.queryscope.agent.data.RepeatedWrite;
 import me.fertiz.queryscope.agent.data.RequestReport;
 import me.fertiz.queryscope.agent.data.RequestTrace;
+import me.fertiz.queryscope.agent.data.SlowMethod;
 import me.fertiz.queryscope.agent.data.TooManyQueries;
 import me.fertiz.queryscope.agent.data.UnitKind;
 import org.junit.jupiter.api.Test;
@@ -56,7 +59,8 @@ class ReportJsonTest {
                 new RepeatedWrite("insert into events values (?)", null, List.of(0), 1_000_000),
                 new DuplicateQuery("select * from events where id = ?", "[1]", null, List.of(0, 0)),
                 new LargeResult(0, query),
-                new TooManyQueries(31, 30, 1_000_000, 2_000_000))));
+                new TooManyQueries(31, 30, 1_000_000, 2_000_000),
+                new SlowMethod("com.acme.ImportJob.parse", 4, 1_500_000, 2_000_000))));
 
         assertTrue(json.contains("\"kind\":\"task\""), json);
         assertTrue(json.contains("{\"type\":\"repeatedWrite\",\"sql\":\"insert into events values (?)\","
@@ -67,6 +71,25 @@ class ReportJsonTest {
                 + "\"rows\":900,\"queryIndex\":0}"), json);
         assertTrue(json.contains("{\"type\":\"tooManyQueries\",\"queries\":31,\"limit\":30,\"databaseMs\":1.000,"
                 + "\"durationMs\":2.000}"), json);
+        assertTrue(json.contains("{\"type\":\"slowMethod\",\"method\":\"com.acme.ImportJob.parse\",\"calls\":4,"
+                + "\"ownMs\":1.500,\"durationMs\":2.000}"), json);
+    }
+
+    @Test
+    void writesTheCallTreeWithItsQueries() {
+        CallNode toDto = new CallNode("com.acme.Mapper.toDto", 2, 600_000, 600_000, false, List.of(0, 1), List.of());
+        CallNode list = new CallNode("com.acme.Service.list", 1, 1_000_000, 400_000, true, List.of(), List.of(toDto));
+        RequestTrace trace = new RequestTrace(4, UnitKind.HTTP, "GET", "/orders", 200, Reports.STARTED_AT, 2_000_000,
+                List.of(), new CallTree(List.of(list), List.of(2), false), 3);
+
+        String json = ReportJson.ofCalls(new RequestReport(trace, List.of()), List.of("com.acme"));
+
+        assertEquals("{\"id\":4,\"durationMs\":2.000,\"packages\":[\"com.acme\"],\"truncated\":false,"
+                + "\"classesLoaded\":3,\"warmUp\":false,\"outsideQueryIndexes\":[2],\"methods\":["
+                + "{\"method\":\"com.acme.Service.list\",\"calls\":1,\"totalMs\":1.000,\"selfMs\":0.400,"
+                + "\"startedBeforeUnit\":true,\"queryIndexes\":[],\"children\":["
+                + "{\"method\":\"com.acme.Mapper.toDto\",\"calls\":2,\"totalMs\":0.600,\"selfMs\":0.600,"
+                + "\"startedBeforeUnit\":false,\"queryIndexes\":[0,1],\"children\":[]}]}]}", json);
     }
 
     @Test

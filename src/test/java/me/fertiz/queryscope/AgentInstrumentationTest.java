@@ -9,11 +9,14 @@ import jakarta.servlet.ServletRequest;
 import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import me.fertiz.queryscope.agent.data.CallNode;
 import me.fertiz.queryscope.agent.data.QueryExecution;
 import me.fertiz.queryscope.agent.data.RequestTrace;
 import me.fertiz.queryscope.agent.data.UnitKind;
 import me.fertiz.queryscope.agent.instrument.AgentInstaller;
+import me.fertiz.queryscope.agent.trace.AppPackages;
 import me.fertiz.queryscope.agent.trace.RequestTracer;
+import me.fertiz.queryscope.profiled.BookCatalog;
 import net.bytebuddy.agent.ByteBuddyAgent;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -44,7 +47,8 @@ class AgentInstrumentationTest {
 
     @BeforeAll
     static void installAgent() throws SQLException {
-        AgentInstaller.install(ByteBuddyAgent.install(), List.of(ImportJob.class.getName() + "#run"));
+        AgentInstaller.install(ByteBuddyAgent.install(), List.of(ImportJob.class.getName() + "#run"),
+                AppPackages.of(List.of(BookCatalog.class.getPackageName())));
         RequestTracer.publishTo(TRACES::add);
 
         HikariConfig config = new HikariConfig();
@@ -206,6 +210,55 @@ class AgentInstrumentationTest {
         }));
 
         assertEquals(500, singleTrace().status());
+    }
+
+    @Test
+    void buildsTheCallTreeOfApplicationMethodsWithTheQueriesEachOneRan() {
+        handle(request(DispatcherType.REQUEST, "/catalog"), () -> new BookCatalog(dataSource).titles(1, 2, 3));
+
+        CallNode titles = single(singleTrace().callTree().calls());
+        CallNode title = single(titles.children());
+        assertEquals(BookCatalog.class.getName() + ".titles", titles.method());
+        assertEquals(1, titles.calls());
+        assertFalse(titles.startedBeforeUnit());
+        assertEquals(BookCatalog.class.getName() + ".title", title.method());
+        assertEquals(3, title.calls());
+        assertEquals(List.of(0, 1, 2), title.queryIndexes());
+        assertTrue(titles.totalNanos() >= title.totalNanos());
+    }
+
+    @Test
+    void foldsRecursionAndKeepsTheTreeRightAfterAnException() {
+        handle(request(DispatcherType.REQUEST, "/catalog"), () -> {
+            BookCatalog catalog = new BookCatalog(dataSource);
+            assertEquals(4, catalog.depth(4));
+            assertThrows(IllegalArgumentException.class, () -> catalog.reject("123"));
+            catalog.titles(1);
+        });
+
+        List<CallNode> calls = singleTrace().callTree().calls();
+        assertEquals(List.of("depth", "reject", "titles"), calls.stream()
+                .map(node -> node.method().substring(node.method().lastIndexOf('.') + 1))
+                .toList());
+        assertEquals(5, calls.get(0).calls());
+        assertEquals(List.of(), calls.get(0).children());
+        assertEquals(List.of(0), single(calls.get(2).children()).queryIndexes());
+    }
+
+    @Test
+    void taskStartedInsideApplicationCodeKeepsTheMethodsAlreadyRunning() throws SQLException {
+        new BookCatalog(dataSource).titles(1, 2);
+
+        RequestTrace trace = singleTrace();
+        CallNode titles = single(trace.callTree().calls());
+        assertEquals("BookCatalog.titles", trace.path());
+        assertTrue(titles.startedBeforeUnit());
+        assertEquals(List.of(0, 1), single(titles.children()).queryIndexes());
+    }
+
+    private static CallNode single(List<CallNode> nodes) {
+        assertEquals(1, nodes.size(), nodes.toString());
+        return nodes.get(0);
     }
 
     private static void findTitle() throws SQLException {

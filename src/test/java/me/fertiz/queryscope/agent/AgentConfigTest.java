@@ -23,7 +23,8 @@ class AgentConfigTest {
         AgentConfig config = AgentConfig.parse(
                 "port=9090, nPlusOneThreshold=3,slowQueryMs=250,largeResultRows=1000,maxQueries=50");
 
-        assertEquals(new AgentConfig(9090, 3, Duration.ofMillis(250), 1000, 50, List.of(), false, true), config);
+        assertEquals(new AgentConfig(9090, 3, Duration.ofMillis(250), 1000, 50,
+                Duration.ofMillis(100), List.of(), List.of(), true, false, true), config);
     }
 
     @Test
@@ -33,6 +34,18 @@ class AgentConfigTest {
         assertFalse(AgentConfig.parse("summary=false").printSummary());
         assertTrue(AgentConfig.DEFAULTS.printSummary());
         assertFalse(AgentConfig.DEFAULTS.openPanel());
+    }
+
+    @Test
+    void readsTheCallTreeOptions() {
+        AgentConfig config = AgentConfig.parse("package=com.acme.shop,package=com.acme.billing,slowMethodMs=40");
+
+        assertEquals(List.of("com.acme.shop", "com.acme.billing"), config.packages());
+        assertEquals(Duration.ofMillis(40), config.slowMethodThreshold());
+        assertTrue(config.profile());
+        assertFalse(AgentConfig.parse("profile=false").profile());
+        assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("package=com..acme"));
+        assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("package=com.acme.*"));
     }
 
     @Test

@@ -22,6 +22,8 @@
     --cyan: #78d9ec;
     --cyan-bg: rgba(120, 217, 236, 0.12);
     --gray-bg: rgba(154, 160, 166, 0.16);
+    --pink: #ff8bcb;
+    --pink-bg: rgba(255, 139, 203, 0.12);
     --sans: Roboto, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
     --mono: "Roboto Mono", "JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
 }
@@ -508,6 +510,11 @@ td.ellipsis {
     background: var(--gray-bg);
 }
 
+.label.slow-method {
+    color: var(--pink);
+    background: var(--pink-bg);
+}
+
 .label + .label {
     margin-left: 4px;
 }
@@ -687,6 +694,10 @@ td.ellipsis {
     border-left-color: var(--muted);
 }
 
+.finding.slow-method {
+    border-left-color: var(--pink);
+}
+
 .finding.clean {
     border-left-color: var(--green);
     color: var(--text-2);
@@ -715,6 +726,141 @@ td.ellipsis {
 
 .finding.large-result .finding-title {
     color: var(--cyan);
+}
+
+.finding.slow-method .finding-title {
+    color: var(--pink);
+}
+
+.call-warm-up {
+    margin: 0;
+    padding: 12px 20px;
+    color: var(--text-2);
+    font-size: 13px;
+}
+
+.call-table td {
+    padding-top: 7px;
+    padding-bottom: 7px;
+}
+
+.call-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.call-name code {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+}
+
+.call-unit {
+    color: var(--text-2);
+    font-family: var(--mono);
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.call-toggle {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-2);
+    font-size: 15px;
+    line-height: 20px;
+    text-align: center;
+    cursor: pointer;
+}
+
+span.call-toggle {
+    cursor: default;
+}
+
+button.call-toggle:hover {
+    background: var(--surface-hover);
+    color: var(--text);
+}
+
+.call-note {
+    flex: none;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.call-name .label {
+    flex: none;
+}
+
+.call-queries {
+    color: var(--text);
+}
+
+.call-queries.n-plus-one {
+    color: var(--red);
+}
+
+.call-queries.slow {
+    color: var(--yellow);
+}
+
+.call-queries.repeated-write {
+    color: var(--purple);
+}
+
+.call-queries.duplicate {
+    color: var(--orange);
+}
+
+.call-queries.large-result {
+    color: var(--cyan);
+}
+
+.call-table tr.slow-method td:first-child {
+    box-shadow: inset 3px 0 var(--pink);
+}
+
+.call-share {
+    position: relative;
+    height: 10px;
+    margin-top: 5px;
+    border-radius: 2px;
+    background: var(--surface-sunken);
+}
+
+.call-share-total, .call-share-self {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    border-radius: 2px;
+}
+
+.call-share-total {
+    background: rgba(138, 180, 248, 0.28);
+}
+
+.call-share-self {
+    background: var(--blue);
+}
+
+.call-table tr.slow-method .call-share-total {
+    background: rgba(255, 139, 203, 0.28);
+}
+
+.call-table tr.slow-method .call-share-self {
+    background: var(--pink);
 }
 
 .sql-block {

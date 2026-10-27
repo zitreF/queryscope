@@ -13,9 +13,11 @@ import java.util.List;
 public class ReportController {
 
     private final AuditReportService auditReportService;
+    private final RevenueSheetService revenueSheetService;
 
-    public ReportController(AuditReportService auditReportService) {
+    public ReportController(AuditReportService auditReportService, RevenueSheetService revenueSheetService) {
         this.auditReportService = auditReportService;
+        this.revenueSheetService = revenueSheetService;
     }
 
     @GetMapping("/customer-activity")
@@ -26,6 +28,11 @@ public class ReportController {
     @GetMapping("/recent-returns")
     public List<AuditEvent> recentReturns(@RequestParam(defaultValue = "20") int limit) {
         return auditReportService.recentReturns(limit);
+    }
+
+    @GetMapping(value = "/daily-revenue", produces = "text/csv")
+    public String dailyRevenue(@RequestParam(defaultValue = "365") int days) {
+        return revenueSheetService.dailyRevenue(days);
     }
 
     @PostMapping("/visits")

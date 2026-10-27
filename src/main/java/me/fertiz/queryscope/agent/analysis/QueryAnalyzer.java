@@ -1,5 +1,6 @@
 package me.fertiz.queryscope.agent.analysis;
 
+import me.fertiz.queryscope.agent.data.CallNode;
 import me.fertiz.queryscope.agent.data.DuplicateQuery;
 import me.fertiz.queryscope.agent.data.Finding;
 import me.fertiz.queryscope.agent.data.LargeResult;
@@ -8,6 +9,7 @@ import me.fertiz.queryscope.agent.data.QueryExecution;
 import me.fertiz.queryscope.agent.data.RepeatedWrite;
 import me.fertiz.queryscope.agent.data.RequestReport;
 import me.fertiz.queryscope.agent.data.RequestTrace;
+import me.fertiz.queryscope.agent.data.SlowMethod;
 import me.fertiz.queryscope.agent.data.SlowQuery;
 import me.fertiz.queryscope.agent.data.TooManyQueries;
 
@@ -25,6 +27,7 @@ public final class QueryAnalyzer {
     private static final List<String> READS = List.of("select", "with");
     private static final List<String> WRITES = List.of("insert", "update", "delete", "merge", "upsert", "replace");
     private static final int DUPLICATE_THRESHOLD = 2;
+    private static final int MAX_SLOW_METHODS = 3;
 
     private final Thresholds thresholds;
 
@@ -76,12 +79,39 @@ public final class QueryAnalyzer {
                 findings.add(new LargeResult(index, queries.get(index)));
             }
         }
+        if (!trace.isWarmUp()) {
+            findings.addAll(slowMethods(trace));
+        }
         if (queries.size() >= thresholds.queriesPerRequest()) {
             long databaseNanos = queries.stream().mapToLong(QueryExecution::durationNanos).sum();
             findings.add(new TooManyQueries(queries.size(), thresholds.queriesPerRequest(), databaseNanos,
                     trace.durationNanos()));
         }
         return new RequestReport(trace, List.copyOf(findings));
+    }
+
+    private List<SlowMethod> slowMethods(RequestTrace trace) {
+        Map<String, OwnTime> methods = new LinkedHashMap<>();
+        collectOwnTime(trace.callTree().calls(), trace.queries(), methods);
+        long thresholdNanos = thresholds.slowMethod().toNanos();
+        return methods.entrySet().stream()
+                .filter(entry -> entry.getValue().nanos() >= thresholdNanos)
+                .sorted(Comparator.comparingLong((Map.Entry<String, OwnTime> entry) -> entry.getValue().nanos()).reversed())
+                .limit(MAX_SLOW_METHODS)
+                .map(entry -> new SlowMethod(entry.getKey(), entry.getValue().calls(), entry.getValue().nanos(),
+                        trace.durationNanos()))
+                .toList();
+    }
+
+    private static void collectOwnTime(List<CallNode> nodes, List<QueryExecution> queries, Map<String, OwnTime> methods) {
+        for (CallNode node : nodes) {
+            if (!node.startedBeforeUnit()) {
+                long sqlNanos = totalNanos(queries, node.queryIndexes());
+                methods.merge(node.method(), new OwnTime(node.calls(), Math.max(0, node.selfNanos() - sqlNanos)),
+                        OwnTime::plus);
+            }
+            collectOwnTime(node.children(), queries, methods);
+        }
     }
 
     private static List<List<Integer>> repeated(Map<String, List<Integer>> groups, int threshold) {
@@ -113,5 +143,12 @@ public final class QueryAnalyzer {
                 .max(Map.Entry.comparingByValue())
                 .map(Map.Entry::getKey)
                 .orElse(null);
+    }
+
+    private record OwnTime(long calls, long nanos) {
+
+        private OwnTime plus(OwnTime other) {
+            return new OwnTime(calls + other.calls, nanos + other.nanos);
+        }
     }
 }

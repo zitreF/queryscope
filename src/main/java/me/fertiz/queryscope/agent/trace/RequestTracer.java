@@ -93,7 +93,7 @@ public final class RequestTracer {
             current = null;
         }
         if (current == null) {
-            current = ActiveRequest.background(IDS.incrementAndGet(), CallSites.entryName());
+            current = ActiveRequest.background(IDS.incrementAndGet(), taskName());
             CURRENT.set(current);
         }
         current.enterQuery();
@@ -121,6 +121,10 @@ public final class RequestTracer {
         if (current != null && current.isBackground() && current.isBetweenQueries()) {
             finishCurrent(NO_STATUS);
         }
+    }
+
+    private static String taskName() {
+        return CallTracer.outermostMethod().map(CallSites::shortName).orElseGet(CallSites::entryName);
     }
 
     private static void watchRows(QueryRecord query, Object result) {

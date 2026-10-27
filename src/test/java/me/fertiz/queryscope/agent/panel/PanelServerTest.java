@@ -16,6 +16,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Iterator;
+import java.util.List;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -30,7 +31,7 @@ class PanelServerTest {
 
     @BeforeEach
     void startPanel() throws IOException {
-        panel = PanelServer.start(0, store);
+        panel = PanelServer.start(0, store, List.of("com.acme"));
     }
 
     @AfterEach
@@ -60,6 +61,20 @@ class PanelServerTest {
         assertTrue(requests.body().contains("\"path\":\"/orders\""));
         assertEquals(204, cleared.statusCode());
         assertTrue(store.newestFirst().isEmpty());
+    }
+
+    @Test
+    void servesTheCallTreeOfOneStoredRequest() throws Exception {
+        store.add(Reports.plain(5, "/orders"));
+
+        HttpResponse<String> calls = get("/api/requests/5/calls");
+
+        assertEquals(200, calls.statusCode());
+        assertTrue(calls.body().startsWith("{\"id\":5,\"durationMs\":2.000,\"packages\":[\"com.acme\"]"), calls.body());
+        assertEquals(404, get("/api/requests/6/calls").statusCode());
+        assertEquals(404, get("/api/requests/5/queries").statusCode());
+        assertEquals(405, client.send(request("/api/requests/5/calls").DELETE().build(),
+                HttpResponse.BodyHandlers.discarding()).statusCode());
     }
 
     @Test

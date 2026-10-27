@@ -3,7 +3,7 @@ package me.fertiz.queryscope.agent.trace;
 import java.util.List;
 import java.util.Optional;
 
-final class CallSites {
+public final class CallSites {
 
     private static final StackWalker WALKER = StackWalker.getInstance();
     private static final List<String> FRAMEWORK_PACKAGES = List.of(
@@ -13,7 +13,7 @@ final class CallSites {
             "com.microsoft.sqlserver.", "com.fasterxml.", "tools.jackson.", "io.micrometer.",
             "org.flywaydb.", "liquibase.", "org.jooq.", "io.netty.", "reactor.", "kotlin.", "kotlinx.", "scala.",
             "groovy.", "org.codehaus.groovy.", "org.slf4j.", "ch.qos.logback.", "org.aspectj.",
-            "org.junit.", "org.gradle.", "worker.org.gradle.", "me.fertiz.queryscope.agent.");
+            "org.junit.", "org.gradle.", "worker.org.gradle.", "com.intellij.", "me.fertiz.queryscope.agent.");
 
     private CallSites() {
     }
@@ -31,7 +31,7 @@ final class CallSites {
                 .orElseGet(() -> "thread " + Thread.currentThread().getName());
     }
 
-    static String shortName(String qualifiedMethod) {
+    public static String shortName(String qualifiedMethod) {
         int method = qualifiedMethod.lastIndexOf('.');
         int type = qualifiedMethod.lastIndexOf('.', method - 1);
         return type < 0 ? qualifiedMethod : qualifiedMethod.substring(type + 1);

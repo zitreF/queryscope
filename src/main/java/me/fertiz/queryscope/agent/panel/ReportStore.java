@@ -5,6 +5,7 @@ import me.fertiz.queryscope.agent.data.RequestReport;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
@@ -31,6 +32,12 @@ public final class ReportStore {
     public List<RequestReport> newestFirst() {
         synchronized (reports) {
             return List.copyOf(reports);
+        }
+    }
+
+    public Optional<RequestReport> find(long id) {
+        synchronized (reports) {
+            return reports.stream().filter(report -> report.trace().id() == id).findFirst();
         }
     }
 

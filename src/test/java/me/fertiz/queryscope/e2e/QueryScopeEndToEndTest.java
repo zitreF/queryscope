@@ -1,6 +1,10 @@
 package me.fertiz.queryscope.e2e;
 
 import me.fertiz.queryscope.demo.DemoApplication;
+import me.fertiz.queryscope.demo.customer.CustomerController;
+import me.fertiz.queryscope.demo.customer.CustomerService;
+import me.fertiz.queryscope.demo.customer.CustomerSummary;
+import me.fertiz.queryscope.demo.report.RevenueSheetService;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,7 +76,33 @@ class QueryScopeEndToEndTest {
         String output = demo.output();
 
         assertTrue(output.contains("QueryScope panel is running at http://localhost:" + panelPort), output);
+        assertTrue(output.contains("QueryScope records the call tree of me.fertiz.queryscope.demo"), output);
         assertFalse(output.contains("Could not instrument"), output);
+    }
+
+    @Test
+    void buildsTheCallTreeDownToTheMethodBehindTheNPlusOne() throws Exception {
+        JsonNode report = requestAndReport("/api/customers/naive");
+        JsonNode calls = JSON.readTree(get(panelPort, "/api/requests/" + report.path("id").asLong() + "/calls").body());
+
+        assertEquals("me.fertiz.queryscope.demo", single(calls.path("packages")).asString());
+        JsonNode controller = method(calls.path("methods"), CustomerController.class.getName() + ".naive");
+        JsonNode service = method(controller.path("children"), CustomerService.class.getName() + ".summariesNaive");
+        JsonNode summary = method(service.path("children"), CustomerSummary.class.getName() + ".of");
+        assertEquals(1, service.path("queryIndexes").size());
+        assertEquals(40, summary.path("calls").asInt());
+        assertEquals(40, summary.path("queryIndexes").size());
+        assertTrue(controller.path("totalMs").asDouble() >= summary.path("totalMs").asDouble(), controller.toString());
+    }
+
+    @Test
+    void pointsAtTheMethodThatSpendsItsTimeOutsideSql() throws Exception {
+        JsonNode report = requestAndReport("/api/reports/daily-revenue");
+
+        JsonNode slow = finding(report, "slowMethod");
+        assertEquals(RevenueSheetService.class.getName() + ".dailyRevenue", slow.path("method").asString());
+        assertEquals(1, slow.path("calls").asInt());
+        assertEquals(1, report.path("queries").size());
     }
 
     @Test
@@ -199,6 +229,15 @@ class QueryScopeEndToEndTest {
             }
         }
         throw new AssertionError("No " + type + " finding in " + findings);
+    }
+
+    private static JsonNode method(JsonNode nodes, String name) {
+        for (int index = 0; index < nodes.size(); index++) {
+            if (nodes.get(index).path("method").asString().equals(name)) {
+                return nodes.get(index);
+            }
+        }
+        throw new AssertionError("No call of " + name + " in " + nodes);
     }
 
     private static JsonNode single(JsonNode array) {

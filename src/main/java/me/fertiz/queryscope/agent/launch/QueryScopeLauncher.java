@@ -26,6 +26,10 @@ public final class QueryScopeLauncher {
               --slowQueryMs=100           queries at least this slow are reported
               --largeResultRows=500       queries returning at least this many rows are reported
               --maxQueries=30             requests running at least this many queries are reported
+              --slowMethodMs=100          methods spending at least this long in their own code are reported
+              --package=com.acme          package whose methods go into the call tree, can be repeated,
+                                          by default the package of the application's main class
+              --profile=false             turns the call tree off
               --entry=com.acme.Job#run    method whose call becomes one task, can be repeated
 
             JVM options of this java command, such as -Xmx1g or -Dspring.profiles.active=local, are

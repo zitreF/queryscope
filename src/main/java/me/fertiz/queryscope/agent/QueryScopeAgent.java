@@ -9,11 +9,13 @@ import me.fertiz.queryscope.agent.panel.PanelServer;
 import me.fertiz.queryscope.agent.panel.ReportStore;
 import me.fertiz.queryscope.agent.report.ConsoleReporter;
 import me.fertiz.queryscope.agent.report.SessionSummary;
+import me.fertiz.queryscope.agent.trace.AppPackages;
 import me.fertiz.queryscope.agent.trace.RequestTracer;
 
 import java.io.IOException;
 import java.lang.instrument.Instrumentation;
 import java.time.Clock;
+import java.util.List;
 
 public final class QueryScopeAgent {
 
@@ -37,8 +39,9 @@ public final class QueryScopeAgent {
                 summary.accept(report);
             }
         });
-        AgentInstaller.install(instrumentation, config.entryMethods());
-        startPanel(config, store);
+        AppPackages profiled = profiledPackages(config);
+        AgentInstaller.install(instrumentation, config.entryMethods(), profiled);
+        startPanel(config, store, profiled);
         if (config.printSummary()) {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> summary.print(System.out), "queryscope-summary"));
         }
@@ -53,9 +56,21 @@ public final class QueryScopeAgent {
         }
     }
 
-    private static void startPanel(AgentConfig config, ReportStore store) {
+    private static AppPackages profiledPackages(AgentConfig config) {
+        if (!config.profile()) {
+            return AppPackages.of(List.of());
+        }
+        AppPackages packages = config.packages().isEmpty() ? AppPackages.detect() : AppPackages.of(config.packages());
+        LOGGER.log(System.Logger.Level.INFO, packages.isEmpty()
+                ? "QueryScope could not tell the application's package, so the call tree is off."
+                + " Pass package=com.acme to turn it on."
+                : "QueryScope records the call tree of " + String.join(", ", packages.names()));
+        return packages;
+    }
+
+    private static void startPanel(AgentConfig config, ReportStore store, AppPackages profiled) {
         try {
-            PanelServer panel = PanelServer.start(config.port(), store);
+            PanelServer panel = PanelServer.start(config.port(), store, profiled.names());
             String url = "http://localhost:" + panel.port();
             LOGGER.log(System.Logger.Level.INFO, "QueryScope panel is running at " + url);
             if (config.openPanel()) {

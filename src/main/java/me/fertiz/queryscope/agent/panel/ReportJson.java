@@ -1,6 +1,8 @@
 package me.fertiz.queryscope.agent.panel;
 
 import me.fertiz.queryscope.agent.analysis.SqlNormalizer;
+import me.fertiz.queryscope.agent.data.CallNode;
+import me.fertiz.queryscope.agent.data.CallTree;
 import me.fertiz.queryscope.agent.data.DuplicateQuery;
 import me.fertiz.queryscope.agent.data.Finding;
 import me.fertiz.queryscope.agent.data.LargeResult;
@@ -9,6 +11,7 @@ import me.fertiz.queryscope.agent.data.QueryExecution;
 import me.fertiz.queryscope.agent.data.RepeatedWrite;
 import me.fertiz.queryscope.agent.data.RequestReport;
 import me.fertiz.queryscope.agent.data.RequestTrace;
+import me.fertiz.queryscope.agent.data.SlowMethod;
 import me.fertiz.queryscope.agent.data.SlowQuery;
 import me.fertiz.queryscope.agent.data.TooManyQueries;
 
@@ -30,6 +33,23 @@ final class ReportJson {
         JsonWriter json = new JsonWriter();
         write(json, report);
         return json.toString();
+    }
+
+    static String ofCalls(RequestReport report, List<String> packages) {
+        CallTree tree = report.trace().callTree();
+        JsonWriter json = new JsonWriter().beginObject()
+                .name("id").value(report.trace().id())
+                .name("durationMs").value(millis(report.trace().durationNanos()))
+                .name("packages").beginArray();
+        packages.forEach(name -> json.value(name));
+        json.endArray()
+                .name("truncated").value(tree.truncated())
+                .name("classesLoaded").value(report.trace().classesLoaded())
+                .name("warmUp").value(report.trace().isWarmUp());
+        indexes(json, "outsideQueryIndexes", tree.outsideQueryIndexes());
+        json.name("methods").beginArray();
+        tree.calls().forEach(node -> write(json, node));
+        return json.endArray().endObject().toString();
     }
 
     private static void write(JsonWriter json, RequestReport report) {
@@ -80,7 +100,7 @@ final class ReportJson {
                     .name("parameters").value(duplicate.parameters())
                     .name("callSite").value(duplicate.callSite())
                     .name("executions").value(duplicate.executions());
-            indexes(json, duplicate.queryIndexes());
+            indexes(json, "queryIndexes", duplicate.queryIndexes());
         } else if (finding instanceof SlowQuery slow) {
             json.name("type").value("slowQuery")
                     .name("sql").value(SqlNormalizer.normalize(slow.query().sql()))
@@ -99,8 +119,27 @@ final class ReportJson {
                     .name("limit").value(tooMany.limit())
                     .name("databaseMs").value(millis(tooMany.databaseNanos()))
                     .name("durationMs").value(millis(tooMany.durationNanos()));
+        } else if (finding instanceof SlowMethod slow) {
+            json.name("type").value("slowMethod")
+                    .name("method").value(slow.method())
+                    .name("calls").value(slow.calls())
+                    .name("ownMs").value(millis(slow.ownNanos()))
+                    .name("durationMs").value(millis(slow.durationNanos()));
         }
         json.endObject();
+    }
+
+    private static void write(JsonWriter json, CallNode node) {
+        json.beginObject()
+                .name("method").value(node.method())
+                .name("calls").value(node.calls())
+                .name("totalMs").value(millis(node.totalNanos()))
+                .name("selfMs").value(millis(node.selfNanos()))
+                .name("startedBeforeUnit").value(node.startedBeforeUnit());
+        indexes(json, "queryIndexes", node.queryIndexes());
+        json.name("children").beginArray();
+        node.children().forEach(child -> write(json, child));
+        json.endArray().endObject();
     }
 
     private static void repeatedStatement(JsonWriter json, String type, String sql, String callSite,
@@ -110,11 +149,11 @@ final class ReportJson {
                 .name("callSite").value(callSite)
                 .name("executions").value(queryIndexes.size())
                 .name("totalMs").value(millis(totalNanos));
-        indexes(json, queryIndexes);
+        indexes(json, "queryIndexes", queryIndexes);
     }
 
-    private static void indexes(JsonWriter json, List<Integer> queryIndexes) {
-        json.name("queryIndexes").beginArray();
+    private static void indexes(JsonWriter json, String name, List<Integer> queryIndexes) {
+        json.name(name).beginArray();
         queryIndexes.forEach(index -> json.value(index));
         json.endArray();
     }

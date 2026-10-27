@@ -1,5 +1,7 @@
 package me.fertiz.queryscope.agent.analysis;
 
+import me.fertiz.queryscope.agent.data.CallNode;
+import me.fertiz.queryscope.agent.data.CallTree;
 import me.fertiz.queryscope.agent.data.DuplicateQuery;
 import me.fertiz.queryscope.agent.data.Finding;
 import me.fertiz.queryscope.agent.data.LargeResult;
@@ -7,6 +9,7 @@ import me.fertiz.queryscope.agent.data.NPlusOne;
 import me.fertiz.queryscope.agent.data.QueryExecution;
 import me.fertiz.queryscope.agent.data.RepeatedWrite;
 import me.fertiz.queryscope.agent.data.RequestTrace;
+import me.fertiz.queryscope.agent.data.SlowMethod;
 import me.fertiz.queryscope.agent.data.SlowQuery;
 import me.fertiz.queryscope.agent.data.TooManyQueries;
 import me.fertiz.queryscope.agent.data.UnitKind;
@@ -27,7 +30,8 @@ class QueryAnalyzerTest {
     private static final String SERVICE = "com.acme.OrderService.summaries(OrderService.java:20)";
     private static final String MAPPER = "com.acme.OrderMapper.toDto(OrderMapper.java:12)";
 
-    private final QueryAnalyzer analyzer = new QueryAnalyzer(new Thresholds(3, Duration.ofMillis(100), 500, 10));
+    private final QueryAnalyzer analyzer = new QueryAnalyzer(new Thresholds(3, Duration.ofMillis(100), 500, 10,
+            Duration.ofMillis(50)));
 
     @Test
     void reportsSelectRepeatedWithDifferentLiterals() {
@@ -123,10 +127,45 @@ class QueryAnalyzerTest {
                 findings);
     }
 
+    @Test
+    void reportsMethodsThatSpendTooLongInTheirOwnCodeOutsideSql() {
+        List<QueryExecution> queries = List.of(query("select * from orders", SERVICE, 30));
+        CallNode mapperInService = node("com.acme.OrderMapper.toDto", 20, 40, 40, false, List.of());
+        CallNode service = node("com.acme.OrderService.summaries", 1, 200, 140, false, List.of(0), mapperInService);
+        CallNode mapperInJob = node("com.acme.OrderMapper.toDto", 10, 30, 30, false, List.of());
+        CallNode job = node("com.acme.ImportJob.run", 1, 330, 100, true, List.of(), service, mapperInJob);
+        RequestTrace trace = new RequestTrace(1, UnitKind.TASK, "TASK", "ImportJob.run", 0, Instant.now(),
+                Duration.ofMillis(330).toNanos(), queries, new CallTree(List.of(job), List.of(), false), 0);
+
+        List<Finding> findings = analyzer.analyze(trace).findings();
+
+        assertEquals(List.of(
+                new SlowMethod("com.acme.OrderService.summaries", 1, Duration.ofMillis(110).toNanos(),
+                        Duration.ofMillis(330).toNanos()),
+                new SlowMethod("com.acme.OrderMapper.toDto", 30, Duration.ofMillis(70).toNanos(),
+                        Duration.ofMillis(330).toNanos())), findings);
+    }
+
+    @Test
+    void leavesSlowMethodsOutWhileTheJvmIsStillWarmingUp() {
+        CallNode render = node("com.acme.ReportService.render", 1, 400, 400, false, List.of());
+        RequestTrace trace = new RequestTrace(1, UnitKind.HTTP, "GET", "/report", 200, Instant.now(),
+                Duration.ofMillis(400).toNanos(), List.of(), new CallTree(List.of(render), List.of(), false),
+                RequestTrace.WARM_UP_CLASSES);
+
+        assertEquals(List.of(), analyzer.analyze(trace).findings());
+    }
+
     private List<Finding> analyze(List<QueryExecution> queries) {
         RequestTrace trace = new RequestTrace(1, UnitKind.HTTP, "GET", "/orders", 200, Instant.now(),
                 Duration.ofMillis(50).toNanos(), queries);
         return analyzer.analyze(trace).findings();
+    }
+
+    private static CallNode node(String method, long calls, long totalMillis, long selfMillis, boolean startedBefore,
+                                 List<Integer> queryIndexes, CallNode... children) {
+        return new CallNode(method, calls, Duration.ofMillis(totalMillis).toNanos(),
+                Duration.ofMillis(selfMillis).toNanos(), startedBefore, queryIndexes, List.of(children));
     }
 
     private static QueryExecution query(String sql, String callSite, long millis) {

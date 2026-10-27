@@ -13,19 +13,24 @@ public record AgentConfig(
         Duration slowQueryThreshold,
         int largeResultRows,
         int maxQueries,
+        Duration slowMethodThreshold,
         List<String> entryMethods,
+        List<String> packages,
+        boolean profile,
         boolean openPanel,
         boolean printSummary
 ) {
 
-    public static final AgentConfig DEFAULTS =
-            new AgentConfig(7070, 5, Duration.ofMillis(100), 500, 30, List.of(), false, true);
+    public static final AgentConfig DEFAULTS = new AgentConfig(7070, 5, Duration.ofMillis(100), 500, 30,
+            Duration.ofMillis(100), List.of(), List.of(), true, false, true);
 
     private static final Pattern POSITIVE_NUMBER = Pattern.compile("[1-9][0-9]{0,8}");
     private static final Pattern ENTRY_METHOD = Pattern.compile("[\\p{L}_$][\\p{L}\\p{N}_$.]*#[\\p{L}_$][\\p{L}\\p{N}_$]*");
+    private static final Pattern PACKAGE = Pattern.compile("[\\p{L}_$][\\p{L}\\p{N}_$]*(\\.[\\p{L}_$][\\p{L}\\p{N}_$]*)*");
 
     public AgentConfig {
         entryMethods = List.copyOf(entryMethods);
+        packages = List.copyOf(packages);
     }
 
     public static AgentConfig parse(String arguments) {
@@ -37,7 +42,10 @@ public record AgentConfig(
         Duration slowQueryThreshold = DEFAULTS.slowQueryThreshold();
         int largeResultRows = DEFAULTS.largeResultRows();
         int maxQueries = DEFAULTS.maxQueries();
+        Duration slowMethodThreshold = DEFAULTS.slowMethodThreshold();
         List<String> entryMethods = new ArrayList<>();
+        List<String> packages = new ArrayList<>();
+        boolean profile = DEFAULTS.profile();
         boolean openPanel = DEFAULTS.openPanel();
         boolean printSummary = DEFAULTS.printSummary();
         for (String option : arguments.split(",")) {
@@ -50,26 +58,37 @@ public record AgentConfig(
                 case "slowQueryMs" -> slowQueryThreshold = Duration.ofMillis(positiveNumber(key, value));
                 case "largeResultRows" -> largeResultRows = positiveNumber(key, value);
                 case "maxQueries" -> maxQueries = positiveNumber(key, value);
+                case "slowMethodMs" -> slowMethodThreshold = Duration.ofMillis(positiveNumber(key, value));
                 case "entry" -> entryMethods.add(entryMethod(value));
+                case "package" -> packages.add(packageName(value));
+                case "profile" -> profile = flag(key, value);
                 case "open" -> openPanel = flag(key, value);
                 case "summary" -> printSummary = flag(key, value);
                 default -> throw new IllegalArgumentException("Unknown QueryScope option '" + key
                         + "', known options are port, nPlusOneThreshold, slowQueryMs, largeResultRows, maxQueries,"
-                        + " entry, open and summary");
+                        + " slowMethodMs, entry, package, profile, open and summary");
             }
         }
-        return new AgentConfig(port, nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries, entryMethods,
-                openPanel, printSummary);
+        return new AgentConfig(port, nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries,
+                slowMethodThreshold, entryMethods, packages, profile, openPanel, printSummary);
     }
 
     public Thresholds thresholds() {
-        return new Thresholds(nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries);
+        return new Thresholds(nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries, slowMethodThreshold);
     }
 
     private static String entryMethod(String value) {
         if (!ENTRY_METHOD.matcher(value).matches()) {
             throw new IllegalArgumentException(
                     "QueryScope option entry needs a class and a method like com.acme.ImportJob#run, got '" + value + "'");
+        }
+        return value;
+    }
+
+    private static String packageName(String value) {
+        if (!PACKAGE.matcher(value).matches()) {
+            throw new IllegalArgumentException(
+                    "QueryScope option package needs a Java package like com.acme.shop, got '" + value + "'");
         }
         return value;
     }

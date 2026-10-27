@@ -1,8 +1,11 @@
 package me.fertiz.queryscope.agent.trace;
 
+import me.fertiz.queryscope.agent.data.CallTree;
 import me.fertiz.queryscope.agent.data.RequestTrace;
 import me.fertiz.queryscope.agent.data.UnitKind;
 
+import java.lang.management.ClassLoadingMXBean;
+import java.lang.management.ManagementFactory;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -10,6 +13,7 @@ import java.util.List;
 final class ActiveRequest {
 
     private static final String TASK_METHOD = "TASK";
+    private static final ClassLoadingMXBean CLASSES = ManagementFactory.getClassLoadingMXBean();
 
     private final long id;
     private final UnitKind kind;
@@ -18,7 +22,9 @@ final class ActiveRequest {
     private final boolean background;
     private final Instant startedAt = Instant.now();
     private final long startedNanos = System.nanoTime();
+    private final long classesAtStart = CLASSES.getTotalLoadedClassCount();
     private final List<QueryRecord> queries = new ArrayList<>();
+    private final CallTreeBuilder calls = CallTracer.unitStarted(startedNanos);
     private int queryDepth;
     private long queryStartedNanos;
     private long queryFinishedNanos = startedNanos;
@@ -73,13 +79,16 @@ final class ActiveRequest {
         QueryRecord query = new QueryRecord(sql, parameters, queryStartedNanos - startedNanos,
                 queryFinishedNanos - queryStartedNanos, callSite, failed);
         queries.add(query);
+        CallTracer.queryAdded(calls, queries.size() - 1);
         return query;
     }
 
     RequestTrace finish(int status) {
         long endNanos = background ? queryFinishedNanos : System.nanoTime();
+        CallTree callTree = CallTracer.unitFinished(calls, endNanos);
         return new RequestTrace(
                 id, kind, method, path, status, startedAt, endNanos - startedNanos,
-                queries.stream().map(QueryRecord::toExecution).toList());
+                queries.stream().map(QueryRecord::toExecution).toList(), callTree,
+                CLASSES.getTotalLoadedClassCount() - classesAtStart);
     }
 }

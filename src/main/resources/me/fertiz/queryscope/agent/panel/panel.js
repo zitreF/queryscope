@@ -25,7 +25,11 @@ const FINDING_TYPES = {
     duplicateQuery: {css: 'duplicate', name: 'Duplicate', label: finding => `Duplicate ×${finding.executions}`},
     largeResult: {css: 'large-result', name: 'Rows', label: finding => `${formatCount(finding.rows)} rows`},
     tooManyQueries: {css: 'too-many', name: 'Queries', label: finding => `${finding.queries} queries`},
+    slowMethod: {css: 'slow-method', name: 'Code', label: finding => `Code ${formatMs(finding.ownMs)}`},
 };
+const QUERY_ROLE_PRIORITY = ['n-plus-one', 'slow', 'repeated-write', 'duplicate', 'large-result'];
+const CALL_INDENT = 18;
+const CALL_EXPAND_SHARE = 0.05;
 const ROLE_ORDER = ['duplicateQuery', 'repeatedWrite', 'largeResult', 'nPlusOne', 'slowQuery'];
 
 const state = {
@@ -47,6 +51,8 @@ const state = {
     feedTimes: [],
     announced: new Set(),
     snackTimer: 0,
+    callTrees: new Map(),
+    callToggles: new Map(),
 };
 
 const $ = id => document.getElementById(id);
@@ -535,9 +541,8 @@ function renderFeed() {
                 el('td', {}, findingLabel(finding)),
                 el('td', {class: 'ellipsis'},
                     el('div', {class: 'path', title: report.path}, `${report.method} ${report.path}`),
-                    el('div', {class: 'path', title: finding.callSite ?? ''},
-                        el('span', {class: 'muted'},
-                            finding.callSite ? shortCallSite(finding.callSite) : 'Location unknown'))));
+                    el('div', {class: 'path', title: finding.callSite ?? finding.method ?? ''},
+                        el('span', {class: 'muted'}, findingLocation(finding)))));
         })));
 }
 
@@ -623,10 +628,176 @@ function renderDetails(report) {
                 fact('Started', new Date(report.view.start).toLocaleTimeString()))),
         el('h3', {class: 'section-title'}, 'Findings'),
         ...findingCards(report),
+        el('h3', {class: 'section-title'}, 'Call tree'),
+        el('div', {class: 'panel call-tree', id: 'call-tree', 'data-id': report.id},
+            el('p', {class: 'empty', style: {paddingTop: '20px'}}, 'Loading the call tree…')),
         el('h3', {class: 'section-title'}, 'Timeline'),
         timeline(report, roles),
         el('h3', {class: 'section-title'}, 'Queries'),
         queryTable(report, roles));
+    state.callToggles = new Map();
+    loadCallTree(report, roles);
+}
+
+async function loadCallTree(report, roles) {
+    let tree = state.callTrees.get(report.id);
+    if (!tree) {
+        try {
+            const response = await fetch(`/api/requests/${report.id}/calls`);
+            tree = response.ok ? await response.json() : {missing: true};
+            if (state.callTrees.size >= MAX_REPORTS) {
+                state.callTrees.clear();
+            }
+            state.callTrees.set(report.id, tree);
+        } catch (error) {
+            tree = {failed: true};
+        }
+    }
+    renderCallTree(report, tree, roles);
+}
+
+function renderCallTree(report, tree, roles) {
+    const container = $('call-tree');
+    if (!container || container.dataset.id !== String(report.id)) {
+        return;
+    }
+    const unit = isTask(report) ? 'task' : 'request';
+    const message = text => [el('p', {class: 'empty', style: {paddingTop: '20px'}}, text)];
+    if (tree.missing || tree.failed) {
+        container.replaceChildren(...message(tree.missing
+            ? `The agent no longer keeps this ${unit}.`
+            : 'Could not load the call tree from the agent.'));
+        return;
+    }
+    if (tree.packages.length === 0) {
+        container.replaceChildren(...message('No call tree: QueryScope could not tell which package is your code, or it was '
+            + 'turned off. Start the agent with package=com.acme (or --package=com.acme with the launcher).'));
+        return;
+    }
+    if (tree.methods.length === 0) {
+        container.replaceChildren(...message(`None of the methods in ${tree.packages.join(', ')} ran in this ${unit}.`));
+        return;
+    }
+    const outsideMs = Math.max(0, report.durationMs - tree.methods.reduce((sum, node) => sum + node.totalMs, 0));
+    const root = {
+        method: null,
+        calls: 1,
+        totalMs: report.durationMs,
+        selfMs: outsideMs,
+        startedBeforeUnit: false,
+        queryIndexes: tree.outsideQueryIndexes,
+        children: tree.methods,
+    };
+    const context = {
+        report,
+        roles,
+        duration: Math.max(report.durationMs, 0.001),
+        slowMethods: new Set(report.findings.filter(finding => finding.type === 'slowMethod').map(finding => finding.method)),
+        rerender: () => renderCallTree(report, tree, roles),
+    };
+    const rows = [];
+    callRows(root, 0, 'root', context, rows);
+    const calls = table(
+        [
+            {title: 'Method', width: 'auto'},
+            {title: 'Calls', width: '80px', number: true},
+            {title: 'Total', width: '90px', number: true},
+            {title: 'Self', width: '90px', number: true},
+            {title: 'Queries', width: '80px', number: true},
+            {title: 'Share of time', width: '18%'},
+        ],
+        rows);
+    calls.classList.add('call-table');
+    container.replaceChildren(...[
+        tree.warmUp
+            ? el('p', {class: 'call-warm-up'}, `The JVM loaded ${formatCount(tree.classesLoaded)} classes while this `
+                + `${unit} ran, so its times include warm-up and slow methods are not reported for it.`)
+            : null,
+        calls,
+        tree.truncated
+            ? el('p', {class: 'empty'}, 'The tree stops at 1,000 methods or 100 levels, the rest is counted in the method above.')
+            : null,
+    ].filter(node => node !== null));
+}
+
+function callRows(node, depth, path, context, rows) {
+    rows.push(callRow(node, depth, path, context));
+    if (isExpanded(node, depth, path, context)) {
+        node.children.forEach((child, index) => callRows(child, depth + 1, `${path}/${index}`, context, rows));
+    }
+}
+
+function callRow(node, depth, path, context) {
+    const hasChildren = node.children.length > 0;
+    const expanded = hasChildren && isExpanded(node, depth, path, context);
+    const queries = node.queryIndexes.length;
+    const role = QUERY_ROLE_PRIORITY.find(candidate => node.queryIndexes.some(index => context.roles[index] === candidate));
+    const slow = node.method !== null && !node.startedBeforeUnit && context.slowMethods.has(node.method);
+    const name = node.method === null
+        ? el('span', {class: 'call-unit'}, isTask(context.report)
+            ? `Task ${context.report.path}`
+            : `${context.report.method} ${context.report.path}`)
+        : el('code', {title: node.method}, shortMethod(node.method));
+    const properties = {class: ['call-row', queries > 0 ? 'clickable' : '', slow ? 'slow-method' : ''].join(' ')};
+    if (queries > 0) {
+        properties.onclick = () => highlightQueries(node.queryIndexes);
+    }
+    return el('tr', properties,
+        el('td', {style: {paddingLeft: `${20 + depth * CALL_INDENT}px`}}, el('div', {class: 'call-name'},
+            hasChildren
+                ? el('button', {
+                    class: 'call-toggle',
+                    'aria-expanded': String(expanded),
+                    'aria-label': expanded ? 'Collapse' : 'Expand',
+                    onclick: event => {
+                        event.stopPropagation();
+                        state.callToggles.set(path, !expanded);
+                        context.rerender();
+                    },
+                }, expanded ? '▾' : '▸')
+                : el('span', {class: 'call-toggle'}),
+            name,
+            node.startedBeforeUnit
+                ? el('span', {class: 'call-note', title: 'This method was already running when the task started, '
+                        + 'so only the time inside the task is counted.'}, 'already running')
+                : null,
+            slow ? el('span', {class: 'label slow-method'}, 'Slow code') : null)),
+        el('td', {class: 'number'}, formatCount(node.calls)),
+        el('td', {class: 'number'}, formatMs(node.totalMs)),
+        el('td', {
+            class: 'number',
+            title: node.method === null ? 'Time outside your methods: the framework, the server and the database driver' : '',
+        }, formatMs(node.selfMs)),
+        el('td', {class: 'number', title: queries > 0 ? 'Click to highlight these queries below' : ''},
+            queries > 0 ? el('span', {class: `call-queries ${role ?? ''}`}, String(queries)) : '—'),
+        el('td', {},
+            el('div', {class: 'call-share', title: `${wholePercent(node.totalMs / context.duration)} in total, `
+                    + `${wholePercent(node.selfMs / context.duration)} in its own code`},
+                el('div', {class: 'call-share-total', style: {width: percent(node.totalMs / context.duration)}}),
+                el('div', {class: 'call-share-self', style: {width: percent(node.selfMs / context.duration)}}))));
+}
+
+function isExpanded(node, depth, path, context) {
+    if (node.children.length === 0) {
+        return false;
+    }
+    if (state.callToggles.has(path)) {
+        return state.callToggles.get(path);
+    }
+    return depth === 0 || node.totalMs / context.duration >= CALL_EXPAND_SHARE || hasQueries(node);
+}
+
+function hasQueries(node) {
+    return node.queryIndexes.length > 0 || node.children.some(hasQueries);
+}
+
+function highlightQueries(indexes) {
+    document.querySelectorAll('tr.highlight').forEach(other => other.classList.remove('highlight'));
+    const rows = indexes.map(index => $(`query-${index}`)).filter(row => row !== null);
+    rows.forEach(row => row.classList.add('highlight'));
+    if (rows.length > 0) {
+        rows[0].scrollIntoView({block: 'center', behavior: 'smooth'});
+    }
 }
 
 function fact(term, value) {
@@ -644,6 +815,7 @@ function findingCards(report) {
         duplicateQuery: duplicateQueryCard,
         largeResult: largeResultCard,
         tooManyQueries: tooManyQueriesCard,
+        slowMethod: slowMethodCard,
     };
     return report.findings.filter(finding => cards[finding.type]).map(finding => cards[finding.type](finding));
 }
@@ -702,6 +874,18 @@ function tooManyQueriesCard(finding) {
             + ` · the limit is ${finding.limit}`),
         el('div', {class: 'finding-hint'},
             'Look for N+1 patterns and repeated lookups, and load related data with joins instead of separate queries.'));
+}
+
+function slowMethodCard(finding) {
+    const share = finding.durationMs > 0 ? Math.min(100, Math.round(finding.ownMs / finding.durationMs * 100)) : 0;
+    return el('div', {class: 'finding slow-method'},
+        el('div', {class: 'finding-title'}, `Slow method: ${formatMs(finding.ownMs)} in its own code, outside SQL`),
+        el('div', {class: 'finding-meta'},
+            el('code', {title: finding.method}, shortMethod(finding.method)),
+            ` · ${plural(finding.calls, 'call', 'calls')} · ${share}% of the time`),
+        el('div', {class: 'finding-hint'},
+            'The time goes to Java, not to the database: this method and the library code it calls. Look for loops that '
+            + 'build strings, heavy mapping or serialization, and blocking calls. The call tree below shows where.'));
 }
 
 function callSiteLine(callSite) {
@@ -766,10 +950,7 @@ function queryRoles(report) {
 }
 
 function highlightQuery(index) {
-    const row = $(`query-${index}`);
-    document.querySelectorAll('tr.highlight').forEach(other => other.classList.remove('highlight'));
-    row.classList.add('highlight');
-    row.scrollIntoView({block: 'center', behavior: 'smooth'});
+    highlightQueries([index]);
 }
 
 function highlightSql(sql) {
@@ -811,7 +992,15 @@ function isTask(report) {
 }
 
 function findingKey(report, finding) {
-    return `${finding.type}|${finding.sql ?? ''}|${finding.callSite ?? `${report.method} ${report.view.endpointPath}`}`;
+    return `${finding.type}|${finding.sql ?? finding.method ?? ''}|`
+        + `${finding.callSite ?? `${report.method} ${report.view.endpointPath}`}`;
+}
+
+function findingLocation(finding) {
+    if (finding.callSite) {
+        return shortCallSite(finding.callSite);
+    }
+    return finding.method ? shortMethod(finding.method) : 'Location unknown';
 }
 
 function parseInstant(text) {
@@ -828,6 +1017,10 @@ function shortCallSite(callSite) {
     const open = callSite.indexOf('(');
     const qualified = open < 0 ? callSite : callSite.slice(0, open);
     return qualified.split('.').slice(-2).join('.') + (open < 0 ? '' : callSite.slice(open));
+}
+
+function shortMethod(method) {
+    return method.split('.').slice(-2).join('.');
 }
 
 function formatCount(count) {
@@ -866,6 +1059,10 @@ function ago(ms) {
 
 function percent(fraction) {
     return `${Math.min(100, Math.max(0, fraction * 100)).toFixed(3)}%`;
+}
+
+function wholePercent(fraction) {
+    return `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%`;
 }
 
 function plural(count, one, many) {

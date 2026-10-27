@@ -6,8 +6,10 @@ import me.fertiz.queryscope.agent.data.Finding;
 import me.fertiz.queryscope.agent.data.LargeResult;
 import me.fertiz.queryscope.agent.data.NPlusOne;
 import me.fertiz.queryscope.agent.data.RepeatedWrite;
+import me.fertiz.queryscope.agent.data.SlowMethod;
 import me.fertiz.queryscope.agent.data.SlowQuery;
 import me.fertiz.queryscope.agent.data.TooManyQueries;
+import me.fertiz.queryscope.agent.trace.CallSites;
 
 import java.util.Locale;
 
@@ -40,6 +42,11 @@ final class FindingText {
             return String.format(Locale.ROOT, "Large result: %d rows from %s%s", large.query().rows(),
                     shorten(SqlNormalizer.normalize(large.query().sql())), location(large.query().callSite()));
         }
+        if (finding instanceof SlowMethod slow) {
+            return String.format(Locale.ROOT, "Slow method: %s spent %.1f ms in its own code outside SQL over %d %s,"
+                            + " %.0f%% of the time", CallSites.shortName(slow.method()), millis(slow.ownNanos()),
+                    slow.calls(), slow.calls() == 1 ? "call" : "calls", share(slow.ownNanos(), slow.durationNanos()));
+        }
         TooManyQueries tooMany = (TooManyQueries) finding;
         return String.format(Locale.ROOT, "Too many queries: %d (limit %d), %.0f%% of the time in the database",
                 tooMany.queries(), tooMany.limit(), share(tooMany.databaseNanos(), tooMany.durationNanos()));
@@ -61,6 +68,9 @@ final class FindingText {
         if (finding instanceof LargeResult) {
             return "Rows";
         }
+        if (finding instanceof SlowMethod) {
+            return "Code";
+        }
         return "Queries";
     }
 
@@ -79,6 +89,9 @@ final class FindingText {
         }
         if (finding instanceof LargeResult large) {
             return "rows|" + SqlNormalizer.normalize(large.query().sql()) + "|" + large.query().callSite();
+        }
+        if (finding instanceof SlowMethod slow) {
+            return "method|" + slow.method();
         }
         return "queries";
     }

@@ -39,6 +39,10 @@ That is the whole setup: QueryScope starts your app with the agent attached. Ope
   folded, so `/api/customers/7` and `/api/customers/8` count as `GET /api/customers/{id}`.
 - **Request details.** The Requests tab shows each request's findings, its queries on a timeline and the full SQL with
   syntax highlighting.
+- **Call tree.** Each request and task also gets a tree of your own methods: calls, total and self time, and the
+  queries every method ran, so an N+1 points at the method that loops and a click on it highlights its queries. A
+  method that spends too long in Java rather than in SQL is reported as slow code. Your package is taken from the main
+  class, or set with `package=`.
 - **Any data access code.** Works under Hibernate, Spring Data JPA, `JdbcClient`, `JdbcTemplate` or plain JDBC, with
   any driver and connection pool.
 - **Not only HTTP.** Queries that run outside a request, in scheduled jobs, message listeners or a plain `main`, are
@@ -67,9 +71,10 @@ On Windows use `gradlew.bat`. Open the panel at http://localhost:7070 and call t
 | http://localhost:8080/api/customers/7/card          | looks the customer's name up twice through the same helper          | duplicate query `[7]`   |
 | http://localhost:8080/api/reports/recent-returns    | loads every return event and keeps the 20 newest in memory          | 50,000 rows             |
 | `curl -X POST localhost:8080/api/reports/visits`    | inserts 20 events one statement at a time                           | 20 unbatched writes     |
+| http://localhost:8080/api/reports/daily-revenue     | builds a year of daily revenue as CSV with `+=` in a loop           | slow method             |
 
 The demo also runs a scheduled job every 30 seconds that builds the same naive summaries outside any HTTP request. It
-shows up as the task `CustomerService.summariesNaive` with the same N+1, and the data loaded at startup shows up as
+shows up as the task `DigestJob.prepareDigest` with the same N+1, and the data loaded at startup shows up as
 `DemoApplication.main` with its 150k-row insert flagged as slow.
 
 ## Example: finding and fixing an N+1
@@ -202,11 +207,14 @@ java -javaagent:/path/to/queryscope.jar=port=9090,nPlusOneThreshold=3,slowQueryM
 | `slowQueryMs`       | `100`   | Queries taking at least this long are reported as slow       |
 | `largeResultRows`   | `500`   | Queries returning at least this many rows are reported       |
 | `maxQueries`        | `30`    | Requests or tasks running at least this many queries         |
+| `slowMethodMs`      | `100`   | Methods spending at least this long in their own code        |
+| `package`           | main's  | Package whose methods form the call tree, can be repeated    |
+| `profile`           | `true`  | Records the call tree of your methods                        |
 | `entry`             | none    | `Class#method` whose call becomes one task, can be repeated  |
 | `open`              | `false` | Opens the panel in the default browser once it is running    |
 | `summary`           | `true`  | Prints the session summary when the JVM stops                |
 
-`open` and `summary` work without a value too, so `--open` and `open` mean `open=true`. An unknown option or an
+`open`, `summary` and `profile` work without a value too, so `--open` and `open` mean `open=true`. An unknown option or an
 invalid value stops the JVM at startup with a message that names it. If the port is taken, the panel is skipped and
 findings still go to the log.
 
@@ -228,11 +236,12 @@ so don't attach it in production.
 
 The panel is backed by a small JSON API on the same port:
 
-| Endpoint               | Returns                                                                     |
-|------------------------|-----------------------------------------------------------------------------|
-| `GET /api/requests`    | the last 200 requests that ran SQL, newest first, with queries and findings |
-| `DELETE /api/requests` | clears them                                                                 |
-| `GET /api/events`      | a server-sent events stream with one `request` event per finished request   |
+| Endpoint                       | Returns                                                                     |
+|--------------------------------|-----------------------------------------------------------------------------|
+| `GET /api/requests`            | the last 200 requests that ran SQL, newest first, with queries and findings |
+| `DELETE /api/requests`         | clears them                                                                 |
+| `GET /api/events`              | a server-sent events stream with one `request` event per finished request   |
+| `GET /api/requests/{id}/calls` | the call tree of one stored request, with the queries of each method        |
 
 For example, after clicking through the demo, list the requests that have a finding:
 
@@ -267,6 +276,7 @@ of this repository does exactly that for the demo.
 ```
 HTTP request ─> FilterChain.doFilter ─opens─> unit of work (one per thread)
                                                    ▲
+Methods of your packages, enter and exit ──────────┤ call tree
 Connection.prepareStatement, setXxx ───────────────┤ SQL and bound parameters
 Statement / PreparedStatement.execute* ────────────┤ time and call site
 ResultSet.next ────────────────────────────────────┤ rows
@@ -281,7 +291,8 @@ ResultSet.next ─────────────────────�
 
 - **AgentInstaller** is a table of hooks: `FilterChain.doFilter` and `HttpServlet.service` in both servlet namespaces,
   `prepareStatement`, `close`, `commit` and `rollback` on every `java.sql.Connection`, the `execute` methods of every
-  `java.sql.Statement`, and one hook per `entry=` method. Types are matched by the JDBC and Servlet interfaces they
+  `java.sql.Statement`, one hook per `entry=` method and one for every method of the classes in your packages.
+  Types are matched by the JDBC and Servlet interfaces they
   implement, never by driver, pool or container classes. The first `REQUEST` dispatch on a thread opens a trace and
   its exit closes it, so queries run by filters, forwards and the servlet all land in one request.
 - **Servlets** reads the method, URI and status through `MethodHandle`s looked up once per request class, so one
@@ -291,17 +302,23 @@ ResultSet.next ─────────────────────�
   statement carries no SQL, so the tracer remembers it from `prepareStatement`, together with the values bound by
   every `setXxx` call, in a weak identity map that never keeps statements alive. Each returned `ResultSet` is tracked
   the same way and counts its rows as `next()` is called. `StackWalker` records the first frame outside the JDK,
-  frameworks, drivers and
-  generated proxies, which is the line of application code that ran the query. A query with no request around it
-  opens a task instead, which ends on `close`, `commit` or `rollback`, after a second without queries, or at 1000
-  queries.
+  frameworks, drivers and generated proxies, which is the line of application code that ran the query. A query with
+  no request around it opens a task instead, named after the outermost method of yours on the thread, which ends on
+  `close`, `commit` or `rollback`, after a second without queries, or at 1000 queries.
+- **CallTracer** keeps a stack of your methods per thread, fed by an advice inlined into each of them. While a request
+  or task runs, every call lands in a tree node keyed by its parent and method, which counts calls and time, and each
+  query is added to the method on top of the stack. Methods already running when a task starts are kept and marked,
+  direct recursion folds into one node, and a tree stops growing at 1000 methods or 100 levels. Packages come from the
+  main class, or from `Start-Class` and `Main-Class` in the manifest of the jar, and generated proxies are skipped.
 - **SqlNormalizer** turns number and string literals into `?`, collapses `IN (1, 2, 3)` to `IN (?)`, and drops
   comments, case and extra whitespace, so queries that differ only in their values group together.
 - **QueryAnalyzer** reports a SELECT that runs at least `nPlusOneThreshold` times in one request as N+1, naming the
   call site behind most of the repeats, and a write repeated as often as unbatched. The same SELECT with the same
   parameters run twice is a duplicate, unless it is already part of an N+1. Every query that takes at least
   `slowQueryMs` is slow, every query returning `largeResultRows` rows is a large result, and a unit of work with
-  `maxQueries` queries or more gets a finding of its own with the share of its time spent in the database.
+  `maxQueries` queries or more gets a finding of its own with the share of its time spent in the database. A method
+  whose self time minus its own queries reaches `slowMethodMs`, summed over its calls, is slow code, unless the JVM
+  loaded 50 classes or more during the request, which means the times are mostly warm-up.
 - **SessionSummary** collects every report by endpoint, with numeric and UUID path segments folded into `{id}` and
   `{uuid}`, and prints its table from a JVM shutdown hook, so it also appears when a launcher-started app is stopped.
   Endpoints and distinct findings are capped, so a long session never grows without bound.
@@ -324,6 +341,10 @@ brings, and the agent is compiled for Java 17.
 - The call site skips `org.springframework.*` frames, so apps whose own code lives under that package (such as Spring
   PetClinic) show the nearest frame outside it.
 - The panel listens on loopback only, so inside a container it has to be reached from the same network namespace.
+- The call tree costs a few dozen nanoseconds per call of your methods. That is fine while developing, but a tight
+  loop calling tiny methods millions of times gets noticeably slower; `profile=false` turns it off.
+- Lambdas, constructors and default methods of interfaces are not nodes of their own: what they call shows up under
+  the method that runs them.
 
 ## Project layout
 
@@ -345,15 +366,17 @@ src/test/java/me/fertiz/queryscope/e2e/      runs the demo, the launcher and the
 Java 25 toolchain, Gradle 9 with Kotlin DSL (wrapper included), Shadow for the agent jar. `build` runs every test:
 
 - Unit tests for the normalizer, the analyzer, the options, the launcher's command line, the parameter formatting, the
-  session summary, the JSON writer, the report store and the panel server, including SSE and the `Host` check.
+  session summary, the call stack, the package detection, the JSON writer, the report store and the panel server,
+  including SSE and the `Host` check.
 - `AgentInstrumentationTest` installs the agent into the test JVM with ByteBuddyAgent and runs real queries through
   HikariCP and H2 inside simulated `jakarta.servlet` and `javax.servlet` requests, outside any request, and inside an
-  `entry=` method.
+  `entry=` method, and checks the call tree of a profiled fixture class, with recursion and exceptions.
 - `CustomerServiceTest` checks that the demo's optimized endpoint returns exactly the same summaries as the naive one.
 - `QueryScopeEndToEndTest` starts the demo shop with `-javaagent:queryscope.jar` as a separate process on free ports
   and checks through the panel API that the naive endpoint is an N+1 at `CustomerSummary.of`, the optimized one runs a
   single query with no findings, the report is flagged as slow, duplicates, unbatched writes and large results are
-  found, and new requests arrive over SSE. The demo runs on the test classpath without the agent's own classes, so
+  found, the call tree leads from the controller down to `CustomerSummary.of`, the CSV export is slow code, and new
+  requests arrive over SSE. The demo runs on the test classpath without the agent's own classes, so
   only the shaded `queryscope.jar` is attached.
 - `LauncherEndToEndTest` starts the demo through `java -jar queryscope.jar` and checks that killing the launcher takes
   the app down with it.

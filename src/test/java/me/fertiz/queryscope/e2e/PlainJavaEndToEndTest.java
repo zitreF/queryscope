@@ -18,6 +18,7 @@ class PlainJavaEndToEndTest {
     void tracesAPlainJavaProgramAndPrintsTheSummaryWhenItExits() throws Exception {
         String output = run("", "e2e-plain.log");
 
+        assertTrue(output.contains("QueryScope records the call tree of me.fertiz.queryscope.plain"), output);
         assertTrue(output.contains("Task PlainJdbcApp.main, 12 queries"), output);
         assertTrue(output.contains("N+1: 10 x select title from books where id = ? at "
                 + "me.fertiz.queryscope.plain.PlainJdbcApp.title(PlainJdbcApp.java:"), output);

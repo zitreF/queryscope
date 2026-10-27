@@ -12,7 +12,9 @@ import java.io.UncheckedIOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -21,6 +23,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class PanelServer {
 
@@ -32,21 +36,24 @@ public final class PanelServer {
     private static final String JSON = "application/json; charset=utf-8";
     private static final long HEARTBEAT_SECONDS = 15;
     private static final int MAX_PENDING_EVENTS = 500;
+    private static final Pattern CALLS_PATH = Pattern.compile("/api/requests/(\\d{1,18})/calls");
 
     private final HttpServer server;
     private final ExecutorService executor;
     private final ReportStore store;
+    private final List<String> profiledPackages;
 
-    private PanelServer(HttpServer server, ExecutorService executor, ReportStore store) {
+    private PanelServer(HttpServer server, ExecutorService executor, ReportStore store, List<String> profiledPackages) {
         this.server = server;
         this.executor = executor;
         this.store = store;
+        this.profiledPackages = List.copyOf(profiledPackages);
     }
 
-    public static PanelServer start(int port, ReportStore store) throws IOException {
+    public static PanelServer start(int port, ReportStore store, List<String> profiledPackages) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0);
         ExecutorService executor = Executors.newCachedThreadPool(daemonThreads());
-        PanelServer panel = new PanelServer(server, executor, store);
+        PanelServer panel = new PanelServer(server, executor, store, profiledPackages);
         server.createContext("/", localOnly(panel::serveAsset));
         server.createContext("/api/requests", localOnly(panel::serveRequests));
         server.createContext("/api/events", localOnly(panel::streamEvents));
@@ -79,6 +86,11 @@ public final class PanelServer {
     }
 
     private void serveRequests(HttpExchange exchange) throws IOException {
+        String path = exchange.getRequestURI().getPath();
+        if (!path.equals("/api/requests")) {
+            serveCalls(exchange, CALLS_PATH.matcher(path));
+            return;
+        }
         switch (exchange.getRequestMethod()) {
             case "GET" -> respond(exchange, 200, JSON, utf8(ReportJson.of(store.newestFirst())));
             case "DELETE" -> {
@@ -86,6 +98,23 @@ public final class PanelServer {
                 respond(exchange, 204, null, new byte[0]);
             }
             default -> respond(exchange, 405, null, new byte[0]);
+        }
+    }
+
+    private void serveCalls(HttpExchange exchange, Matcher path) throws IOException {
+        if (!path.matches()) {
+            respond(exchange, 404, null, new byte[0]);
+            return;
+        }
+        if (!exchange.getRequestMethod().equals("GET")) {
+            respond(exchange, 405, null, new byte[0]);
+            return;
+        }
+        Optional<RequestReport> report = store.find(Long.parseLong(path.group(1)));
+        if (report.isEmpty()) {
+            respond(exchange, 404, null, new byte[0]);
+        } else {
+            respond(exchange, 200, JSON, utf8(ReportJson.ofCalls(report.get(), profiledPackages)));
         }
     }
 
