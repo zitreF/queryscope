@@ -6,6 +6,7 @@ const state = {
     filter: '',
     attaching: new Set(),
     errors: new Map(),
+    refreshSequence: 0,
 };
 
 $('filter').addEventListener('input', event => {
@@ -13,22 +14,35 @@ $('filter').addEventListener('input', event => {
     render();
 });
 
-refresh();
-setInterval(refresh, REFRESH_MS);
+refreshRepeatedly();
+
+async function refreshRepeatedly() {
+    await refresh();
+    setTimeout(refreshRepeatedly, REFRESH_MS);
+}
 
 async function refresh() {
-    try {
-        const response = await fetch('api/processes');
-        if (!response.ok) {
-            setStatus(`The hub answered ${response.status}`, false);
-            return;
-        }
-        state.processes = await response.json();
-        setStatus(plural(state.processes.length, 'Java process', 'Java processes'), true);
-    } catch (error) {
-        setStatus('The QueryScope hub has stopped', false);
+    const sequence = ++state.refreshSequence;
+    const {processes, problem} = await fetchProcesses();
+    if (sequence !== state.refreshSequence) {
+        return;
+    }
+    if (processes) {
+        state.processes = processes;
+        setStatus(plural(processes.length, 'Java process', 'Java processes'), true);
+    } else {
+        setStatus(problem, false);
     }
     render();
+}
+
+async function fetchProcesses() {
+    try {
+        const response = await fetch('api/processes');
+        return response.ok ? {processes: await response.json()} : {problem: `The hub answered ${response.status}`};
+    } catch (error) {
+        return {problem: 'The QueryScope hub has stopped'};
+    }
 }
 
 function setStatus(text, live) {

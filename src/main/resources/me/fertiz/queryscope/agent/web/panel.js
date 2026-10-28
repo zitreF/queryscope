@@ -3,6 +3,7 @@ const KPI_WINDOW_MS = 60_000;
 const SPARK_BUCKETS = 30;
 const FEED_SIZE = 10;
 const SNACK_MS = 6000;
+const RECONNECT_MS = 2000;
 const TOP_ENDPOINTS = 10;
 const STREAM_TOP = 28;
 const LANE_HEIGHT = 22;
@@ -217,6 +218,9 @@ function connect() {
         buffered = [];
         try {
             const response = await fetch('api/requests');
+            if (!response.ok) {
+                throw new Error(`the panel answered ${response.status}`);
+            }
             const stored = (await response.json()).map(enrich);
             setReports([...buffered.reverse(), ...stored]);
             state.reports.forEach(report => report.findings.forEach(finding => state.announced.add(findingKey(report, finding))));
@@ -224,7 +228,9 @@ function connect() {
             render();
             setConnection(true);
         } catch (error) {
+            events.close();
             setConnection(false);
+            setTimeout(connect, RECONNECT_MS);
         } finally {
             buffered = null;
         }
@@ -331,7 +337,16 @@ function updatePauseButton() {
 }
 
 async function clearAll() {
-    await fetch('api/requests', {method: 'DELETE'});
+    try {
+        const response = await fetch('api/requests', {method: 'DELETE'});
+        if (!response.ok) {
+            throw new Error(`the panel answered ${response.status}`);
+        }
+    } catch (error) {
+        $('snackbar-action').hidden = true;
+        showSnackbar(`Could not clear the requests: ${error.message}`, SNACK_MS);
+        return;
+    }
     setReports([]);
     state.pending = [];
     state.announced.clear();
@@ -1084,6 +1099,7 @@ function announce(report) {
         $('snackbar').hidden = true;
         openFinding(report, finding);
     };
+    $('snackbar-action').hidden = false;
     showSnackbar(`New finding: ${findingText(finding)} in ${report.method} ${report.view.endpointPath}`, SNACK_MS);
 }
 
@@ -1151,8 +1167,9 @@ function renderDetails(report) {
         el('h3', {class: 'section-title'}, 'Timeline'),
         timeline(report, roles),
         el('h3', {class: 'section-title'}, 'Queries'),
-        ...(report.omittedQueries > 0 ? [el('p', {class: 'empty'}, `First ${formatCount(report.queries.length)} of `
-            + `${formatCount(report.view.queryCount)} queries. The rest count in the totals but are not listed.`)] : []),
+        ...(report.omittedQueries > 0 ? [el('p', {class: 'empty'},
+            `First ${formatCount(report.queries.length)} of ${formatCount(report.view.queryCount)} queries.`
+            + ' The rest count in the totals but are not listed.')] : []),
         queryTable(report, roles));
 }
 
