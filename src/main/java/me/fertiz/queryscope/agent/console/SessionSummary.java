@@ -58,7 +58,7 @@ public final class SessionSummary implements Consumer<RequestReport> {
             String key = FindingText.groupKey(finding, name);
             FindingStats stats = findings.get(key);
             if (stats == null && findings.size() < MAX_FINDINGS) {
-                stats = new FindingStats(FindingText.describe(finding), name);
+                stats = new FindingStats(FindingText.describeWithoutParameters(finding), name);
                 findings.put(key, stats);
             }
             if (stats != null) {

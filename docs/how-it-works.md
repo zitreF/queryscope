@@ -68,7 +68,9 @@ java -jar queryscope.jar ─> hub ─> Attach API, loadAgent into a running JVM 
 - **`agentmain`** runs when the hub loads the agent into a running JVM through the JDK's Attach API
   (`VirtualMachine.attach`, `loadAgent`). The manifest names the same class as `Agent-Class`.
 
-`start` runs once per JVM, guarded by an `AtomicBoolean`. Once the panel is up, the agent stores its port in the
+`start` runs once per JVM, guarded by an `AtomicBoolean`. Only invalid options stop the application from starting;
+any other exception or linkage error during startup is logged and leaves the application running without QueryScope,
+and one in the panel leaves it running without the panel. Once the panel is up, the agent stores its port in the
 system property `queryscope.panelPort`. The hub reads that property through the Attach API before and after loading
 the agent, so attaching twice, or attaching to an application that was started with `-javaagent`, finds the existing
 panel instead of loading a second agent.

@@ -4,6 +4,7 @@ import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
+import java.net.BindException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.Map;
@@ -14,6 +15,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class LocalServer {
 
+    private static final int ANY_FREE_PORT = 0;
+
     private final HttpServer server;
     private final ExecutorService executor;
 
@@ -22,8 +25,9 @@ public final class LocalServer {
         this.executor = executor;
     }
 
-    public static LocalServer start(int port, String name, Map<String, HttpHandler> routes) throws IOException {
-        HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0);
+    public static LocalServer start(int port, boolean portGiven, String name, Map<String, HttpHandler> routes)
+            throws IOException {
+        HttpServer server = bind(port, portGiven);
         ExecutorService executor = Executors.newCachedThreadPool(daemonThreads(name));
         routes.forEach((path, handler) -> server.createContext(path, HttpSupport.localOnly(handler)));
         server.setExecutor(executor);
@@ -38,6 +42,17 @@ public final class LocalServer {
     public void stop() {
         server.stop(0);
         executor.shutdownNow();
+    }
+
+    private static HttpServer bind(int port, boolean portGiven) throws IOException {
+        try {
+            return HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0);
+        } catch (BindException e) {
+            if (portGiven || port == ANY_FREE_PORT) {
+                throw e;
+            }
+            return HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), ANY_FREE_PORT), 0);
+        }
     }
 
     private static void startOnDaemonThread(HttpServer server, String name) {

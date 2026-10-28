@@ -48,10 +48,10 @@ public final class PanelServer {
         this.samples = samples;
     }
 
-    public static LocalServer start(int port, ReportStore store, AppPackages callTreePackages,
+    public static LocalServer start(int port, boolean portGiven, ReportStore store, AppPackages callTreePackages,
                                     AppPackages application, SampleStore samples) throws IOException {
         PanelServer panel = new PanelServer(store, callTreePackages, application, samples);
-        return LocalServer.start(port, "queryscope-panel", Map.of(
+        return LocalServer.start(port, portGiven, "queryscope-panel", Map.of(
                 "/", HttpSupport.assets(ASSETS),
                 "/api/requests", panel::serveRequests,
                 "/api/profile", panel::serveProfile,

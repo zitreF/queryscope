@@ -9,6 +9,7 @@ import java.util.regex.Pattern;
 
 public record AgentConfig(
         int port,
+        boolean portGiven,
         int nPlusOneThreshold,
         Duration slowQueryThreshold,
         int largeResultRows,
@@ -23,7 +24,7 @@ public record AgentConfig(
         boolean printSummary
 ) {
 
-    public static final AgentConfig DEFAULTS = new AgentConfig(7070, 5, Duration.ofMillis(100), 500, 30,
+    public static final AgentConfig DEFAULTS = new AgentConfig(7070, false, 5, Duration.ofMillis(100), 500, 30,
             Duration.ofMillis(100), List.of(), List.of(), true, true, Duration.ofMillis(10), false, true);
 
     private static final int MAX_SAMPLE_MILLIS = 1000;
@@ -43,6 +44,7 @@ public record AgentConfig(
             return DEFAULTS;
         }
         int port = DEFAULTS.port();
+        boolean portGiven = DEFAULTS.portGiven();
         int nPlusOneThreshold = DEFAULTS.nPlusOneThreshold();
         Duration slowQueryThreshold = DEFAULTS.slowQueryThreshold();
         int largeResultRows = DEFAULTS.largeResultRows();
@@ -63,7 +65,10 @@ public record AgentConfig(
             String key = keyAndValue[0].trim();
             String value = keyAndValue.length == 2 ? keyAndValue[1].trim() : "";
             switch (key) {
-                case "port" -> port = portNumber(value);
+                case "port" -> {
+                    port = portNumber(value);
+                    portGiven = true;
+                }
                 case "nPlusOneThreshold" -> nPlusOneThreshold = positiveNumber(key, value);
                 case "slowQueryMs" -> slowQueryThreshold = Duration.ofMillis(positiveNumber(key, value));
                 case "largeResultRows" -> largeResultRows = positiveNumber(key, value);
@@ -81,7 +86,7 @@ public record AgentConfig(
                         + " slowMethodMs, entry, package, profile, sampling, sampleMs, open and summary");
             }
         }
-        return new AgentConfig(port, nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries,
+        return new AgentConfig(port, portGiven, nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries,
                 slowMethodThreshold, entryMethods, packages, callTree, sampling, sampleInterval, openPanel, printSummary);
     }
 

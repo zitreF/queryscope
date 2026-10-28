@@ -11,7 +11,7 @@ class HubCommandTest {
 
     @Test
     void startsTheHubOnTheDefaultPortAndOpensTheBrowser() {
-        assertEquals(new HubCommand(HubCommand.DEFAULT_PORT, true, HubCommand.NO_PID, List.of()),
+        assertEquals(new HubCommand(HubCommand.DEFAULT_PORT, false, true, HubCommand.NO_PID, List.of()),
                 HubCommand.parse(List.of()));
     }
 
@@ -19,7 +19,7 @@ class HubCommandTest {
     void keepsItsOwnOptionsAndPassesTheRestToTheAgent() {
         HubCommand command = HubCommand.parse(List.of("port=9000", "open=false", "attach=4321", "slowQueryMs=50"));
 
-        assertEquals(new HubCommand(9000, false, 4321, List.of("slowQueryMs=50")), command);
+        assertEquals(new HubCommand(9000, true, false, 4321, List.of("slowQueryMs=50")), command);
     }
 
     @Test

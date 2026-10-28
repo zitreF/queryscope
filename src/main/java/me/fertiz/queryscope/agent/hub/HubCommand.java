@@ -5,14 +5,13 @@ import me.fertiz.queryscope.agent.http.Browser;
 import me.fertiz.queryscope.agent.http.LocalServer;
 
 import java.io.IOException;
-import java.net.BindException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.regex.Pattern;
 
-public record HubCommand(int port, boolean openBrowser, long attachPid, List<String> agentOptions) {
+public record HubCommand(int port, boolean portGiven, boolean openBrowser, long attachPid, List<String> agentOptions) {
 
     public static final int DEFAULT_PORT = 7070;
     public static final long NO_PID = 0;
@@ -25,6 +24,7 @@ public record HubCommand(int port, boolean openBrowser, long attachPid, List<Str
 
     public static HubCommand parse(List<String> options) {
         int port = DEFAULT_PORT;
+        boolean portGiven = false;
         boolean openBrowser = true;
         long attachPid = NO_PID;
         List<String> agentOptions = new ArrayList<>();
@@ -32,14 +32,17 @@ public record HubCommand(int port, boolean openBrowser, long attachPid, List<Str
             String[] keyAndValue = option.split("=", 2);
             String value = keyAndValue.length == 2 ? keyAndValue[1] : "";
             switch (keyAndValue[0]) {
-                case "port" -> port = AgentConfig.portNumber(value);
+                case "port" -> {
+                    port = AgentConfig.portNumber(value);
+                    portGiven = true;
+                }
                 case "open" -> openBrowser = AgentConfig.flag("open", value);
                 case "attach" -> attachPid = processId(value);
                 default -> agentOptions.add(option);
             }
         }
         AgentConfig.parse(String.join(",", agentOptions));
-        return new HubCommand(port, openBrowser, attachPid, agentOptions);
+        return new HubCommand(port, portGiven, openBrowser, attachPid, agentOptions);
     }
 
     public void run(Path agentJar) throws IOException, InterruptedException {
@@ -50,24 +53,13 @@ public record HubCommand(int port, boolean openBrowser, long attachPid, List<Str
                     + ", its panel is at http://localhost:" + panelPort);
             return;
         }
-        LocalServer hub = startHub(processes);
+        LocalServer hub = HubServer.start(port, portGiven, processes);
         String url = "http://localhost:" + hub.port();
         System.out.println("QueryScope hub is running at " + url + ", pick a Java process there. Ctrl+C stops the hub.");
         if (openBrowser) {
             Browser.open(url);
         }
         new CountDownLatch(1).await();
-    }
-
-    private LocalServer startHub(LocalProcesses processes) throws IOException {
-        try {
-            return HubServer.start(port, processes);
-        } catch (BindException e) {
-            if (port != DEFAULT_PORT) {
-                throw e;
-            }
-            return HubServer.start(0, processes);
-        }
     }
 
     private static long processId(String value) {

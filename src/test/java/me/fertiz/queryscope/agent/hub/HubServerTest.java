@@ -24,7 +24,7 @@ class HubServerTest {
 
     @BeforeEach
     void startHub() throws IOException {
-        hub = HubServer.start(0, processes);
+        hub = HubServer.start(0, true, processes);
     }
 
     @AfterEach

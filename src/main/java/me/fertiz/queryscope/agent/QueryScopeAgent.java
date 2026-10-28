@@ -50,6 +50,19 @@ public final class QueryScopeAgent {
             return;
         }
         AgentConfig config = AgentConfig.parse(arguments);
+        startOrTurnOff(() -> startWith(config, instrumentation));
+    }
+
+    static void startOrTurnOff(Runnable startup) {
+        try {
+            startup.run();
+        } catch (RuntimeException | LinkageError e) {
+            LOGGER.log(System.Logger.Level.WARNING, "QueryScope is off: " + e);
+        }
+    }
+
+    private static void startWith(AgentConfig config, Instrumentation instrumentation) {
+        exitWithLauncher();
         QueryAnalyzer analyzer = new QueryAnalyzer(config.thresholds());
         ConsoleReporter console = new ConsoleReporter();
         ReportStore store = new ReportStore(STORED_REQUESTS);
@@ -72,7 +85,6 @@ public final class QueryScopeAgent {
                 summary.print(System.out, Profile.build(samples, application, Profile.Filter.everything()));
             }, "queryscope-summary"));
         }
-        exitWithLauncher();
     }
 
     private static void publish(RequestTrace trace, QueryAnalyzer analyzer, ConsoleReporter console, ReportStore store,
@@ -107,14 +119,15 @@ public final class QueryScopeAgent {
     private static void startPanel(AgentConfig config, ReportStore store, AppPackages callTreePackages,
                                    AppPackages application, SampleStore samples) {
         try {
-            LocalServer panel = PanelServer.start(config.port(), store, callTreePackages, application, samples);
+            LocalServer panel = PanelServer.start(config.port(), config.portGiven(), store, callTreePackages,
+                    application, samples);
             String url = "http://localhost:" + panel.port();
             System.setProperty(PANEL_PORT_PROPERTY, String.valueOf(panel.port()));
             LOGGER.log(System.Logger.Level.INFO, "QueryScope panel is running at " + url);
             if (config.openPanel()) {
                 Browser.open(url);
             }
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException | LinkageError e) {
             LOGGER.log(System.Logger.Level.WARNING,
                     "QueryScope panel could not start on port " + config.port() + ", queries are logged only: " + e);
         }

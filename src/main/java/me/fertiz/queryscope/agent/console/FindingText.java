@@ -29,6 +29,14 @@ final class FindingText {
     }
 
     static String describe(Finding finding) {
+        if (finding instanceof DuplicateQuery duplicate) {
+            return String.format(Locale.ROOT, "Duplicate query: %d x %s with %s%s", duplicate.executions(),
+                    shorten(duplicate.normalizedSql()), duplicate.parameters(), location(duplicate.callSite()));
+        }
+        return describeWithoutParameters(finding);
+    }
+
+    static String describeWithoutParameters(Finding finding) {
         if (finding instanceof NPlusOne nPlusOne) {
             return String.format(Locale.ROOT, "N+1: %d x %s%s", nPlusOne.executions(),
                     shorten(nPlusOne.normalizedSql()), location(nPlusOne.callSite()));
@@ -38,8 +46,8 @@ final class FindingText {
                     shorten(write.normalizedSql()), location(write.callSite()));
         }
         if (finding instanceof DuplicateQuery duplicate) {
-            return String.format(Locale.ROOT, "Duplicate query: %d x %s with %s%s", duplicate.executions(),
-                    shorten(duplicate.normalizedSql()), duplicate.parameters(), location(duplicate.callSite()));
+            return String.format(Locale.ROOT, "Duplicate query: %d x %s%s", duplicate.executions(),
+                    shorten(duplicate.normalizedSql()), location(duplicate.callSite()));
         }
         if (finding instanceof SlowQuery slow) {
             return String.format(Locale.ROOT, "Slow query: %.1f ms %s%s", millis(slow.query().durationNanos()),
@@ -71,7 +79,7 @@ final class FindingText {
             return "write|" + write.normalizedSql() + "|" + write.callSite();
         }
         if (finding instanceof DuplicateQuery duplicate) {
-            return "duplicate|" + duplicate.normalizedSql() + "|" + duplicate.parameters() + "|" + duplicate.callSite();
+            return "duplicate|" + duplicate.normalizedSql() + "|" + duplicate.callSite();
         }
         if (finding instanceof SlowQuery slow) {
             return "slow|" + slow.normalizedSql() + "|" + slow.query().callSite();

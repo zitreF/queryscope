@@ -121,7 +121,6 @@ const state = {
         search: '',
         data: null,
         layout: [],
-        loading: false,
         loadedAt: 0,
     },
     windowMs: WINDOWS[0].ms,
@@ -422,7 +421,7 @@ function render() {
 function tick() {
     renderStats();
     if (state.view === 'java/profile' && !state.paused && state.profile.scope === null
-        && Date.now() - state.profile.loadedAt >= PROFILE_REFRESH_MS) {
+        && state.profile.request === null && Date.now() - state.profile.loadedAt >= PROFILE_REFRESH_MS) {
         loadProfile();
     }
     const current = now();
@@ -597,6 +596,7 @@ async function loadProfile() {
     if (request.signal.aborted) {
         return;
     }
+    profile.request = null;
     profile.data = data;
     profile.loadedAt = Date.now();
     if (profile.frames === 'app' && !profile.framesChosen && profile.data.packages && profile.data.packages.length === 0) {

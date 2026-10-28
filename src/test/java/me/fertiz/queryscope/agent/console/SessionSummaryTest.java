@@ -1,6 +1,7 @@
 package me.fertiz.queryscope.agent.console;
 
 import me.fertiz.queryscope.agent.calltree.AppPackages;
+import me.fertiz.queryscope.agent.findings.DuplicateQuery;
 import me.fertiz.queryscope.agent.findings.Finding;
 import me.fertiz.queryscope.agent.findings.NPlusOne;
 import me.fertiz.queryscope.agent.findings.RequestReport;
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SessionSummaryTest {
@@ -69,6 +71,18 @@ class SessionSummaryTest {
         assertTrue(output.contains("3 x  N+1: 5 x select * from orders where customer_id = ? at " + MAPPER
                 + "  (GET /api/customers/{id}/orders)"), output);
         assertTrue(output.matches("(?s).*GET /api/customers/\\{id}/orders +3 +6\\.0 .* N\\+1\\R.*"), output);
+    }
+
+    @Test
+    void countsADuplicateQueryOnceWhateverItsParameters() {
+        String sql = "select * from customers where id = ?";
+        summary.accept(http("/api/customers/7/card", 2, List.of(new DuplicateQuery(sql, "[7]", MAPPER, List.of(0, 1)))));
+        summary.accept(http("/api/customers/8/card", 2, List.of(new DuplicateQuery(sql, "[8]", MAPPER, List.of(0, 1)))));
+
+        String output = print();
+
+        assertTrue(output.contains("2 x  Duplicate query: 2 x " + sql + " at " + MAPPER), output);
+        assertFalse(output.contains("[7]"), output);
     }
 
     @Test

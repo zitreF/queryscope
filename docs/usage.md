@@ -260,8 +260,11 @@ after the jar path, separated by commas: `-javaagent:queryscope.jar=port=9090,sl
 | `attach`            | none       | Hub only: attaches to this process ID and exits                         |
 
 `open`, `summary`, `profile` and `sampling` work without a value, so `--open` means `--open=true`. An unknown option or
-an invalid value stops QueryScope at startup with a message that names it. If the port is taken, the panel is skipped
-and findings still go to the log.
+an invalid value stops QueryScope at startup with a message that names it. Anything else that fails at startup, such as
+a runtime built without the `jdk.httpserver` or `java.sql` module, is logged and the application runs on without
+QueryScope or without its panel. When 7070 is taken, for example by the hub, the panel and the hub move to a free port
+and the log shows which one. A port given with `port` is never swapped: if it is taken, the panel is skipped and
+findings still go to the log.
 
 **Your packages.** QueryScope takes them from the main class of the application, or from `Start-Class` and
 `Main-Class` in the manifest of its jar, so `com.acme.shop.ShopApplication` means `com.acme.shop`. If the main class
@@ -365,8 +368,8 @@ that for the demo.
 
 ## Troubleshooting
 
-**The panel does not open.** Look for `QueryScope panel is running at` in the application's log. If the port was taken,
-the log says so; pick another one with `--port`.
+**The panel does not open.** Look for `QueryScope panel is running at` in the application's log; it names the port,
+which is not 7070 when 7070 was taken. If a port given with `--port` was taken, the log says so; pick another one.
 
 **"QueryScope could not tell the application's package".** The main class is a launcher, a framework class or sits in
 a single-segment package. Pass `--package=com.acme` and the call tree, slow code and *Your code* views come back.

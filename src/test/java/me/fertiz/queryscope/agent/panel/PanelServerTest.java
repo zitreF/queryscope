@@ -36,7 +36,8 @@ class PanelServerTest {
 
     @BeforeEach
     void startPanel() throws IOException {
-        panel = PanelServer.start(0, store, AppPackages.of(List.of("com.acme")), AppPackages.of(List.of("com.acme")), samples);
+        AppPackages acme = AppPackages.of(List.of("com.acme"));
+        panel = PanelServer.start(0, true, store, acme, acme, samples);
     }
 
     @AfterEach

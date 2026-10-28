@@ -23,8 +23,15 @@ class AgentConfigTest {
         AgentConfig config = AgentConfig.parse(
                 "port=9090, nPlusOneThreshold=3,slowQueryMs=250,largeResultRows=1000,maxQueries=50");
 
-        assertEquals(new AgentConfig(9090, 3, Duration.ofMillis(250), 1000, 50,
+        assertEquals(new AgentConfig(9090, true, 3, Duration.ofMillis(250), 1000, 50,
                 Duration.ofMillis(100), List.of(), List.of(), true, true, Duration.ofMillis(10), false, true), config);
+    }
+
+    @Test
+    void remembersWhetherThePortWasGiven() {
+        assertFalse(AgentConfig.DEFAULTS.portGiven());
+        assertFalse(AgentConfig.parse("slowQueryMs=50").portGiven());
+        assertTrue(AgentConfig.parse("port=7070").portGiven());
     }
 
     @Test

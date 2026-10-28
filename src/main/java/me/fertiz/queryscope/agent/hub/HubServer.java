@@ -33,9 +33,9 @@ public final class HubServer {
         this.processes = processes;
     }
 
-    public static LocalServer start(int port, Processes processes) throws IOException {
+    public static LocalServer start(int port, boolean portGiven, Processes processes) throws IOException {
         HubServer hub = new HubServer(processes);
-        return LocalServer.start(port, "queryscope-hub", Map.of(
+        return LocalServer.start(port, portGiven, "queryscope-hub", Map.of(
                 "/", HttpSupport.assets(ASSETS),
                 "/api/processes", hub::serveProcesses,
                 "/api/attach", hub::attach));
