@@ -42,6 +42,7 @@ tasks.shadowJar {
     manifest {
         attributes(
             "Premain-Class" to "me.fertiz.queryscope.agent.QueryScopeAgent",
+            "Agent-Class" to "me.fertiz.queryscope.agent.QueryScopeAgent",
             "Main-Class" to "me.fertiz.queryscope.agent.launch.QueryScopeLauncher",
             "Can-Retransform-Classes" to "true",
         )

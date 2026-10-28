@@ -43,8 +43,15 @@ class LaunchCommandTest {
     }
 
     @Test
-    void rejectsAMissingApplication() {
-        assertThrows(IllegalArgumentException.class, () -> LaunchCommand.parse("--port=9090"));
+    void leavesTheTargetEmptyWhenOnlyOptionsAreGiven() {
+        LaunchCommand command = LaunchCommand.parse("--port=9090", "--attach=1234");
+
+        assertEquals(List.of(), command.target());
+        assertEquals(List.of("port=9090", "attach=1234"), command.agentOptions());
+    }
+
+    @Test
+    void rejectsAnIncompleteApplication() {
         assertThrows(IllegalArgumentException.class, () -> LaunchCommand.parse("-cp", "lib/*"));
         assertThrows(IllegalArgumentException.class, () -> LaunchCommand.parse("-jar"));
     }

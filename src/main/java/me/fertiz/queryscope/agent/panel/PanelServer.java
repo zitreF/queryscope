@@ -1,7 +1,6 @@
 package me.fertiz.queryscope.agent.panel;
 
 import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import me.fertiz.queryscope.agent.data.RequestReport;
 import me.fertiz.queryscope.agent.profile.Profile;
@@ -9,34 +8,29 @@ import me.fertiz.queryscope.agent.profile.SampleStore;
 import me.fertiz.queryscope.agent.trace.AppPackages;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.UncheckedIOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static me.fertiz.queryscope.agent.panel.HttpSupport.JSON;
+import static me.fertiz.queryscope.agent.panel.HttpSupport.TEXT;
+import static me.fertiz.queryscope.agent.panel.HttpSupport.localOnly;
+import static me.fertiz.queryscope.agent.panel.HttpSupport.respond;
+import static me.fertiz.queryscope.agent.panel.HttpSupport.utf8;
+
 public final class PanelServer {
 
-    private static final Map<String, Asset> ASSETS = Map.of(
-            "/", new Asset("index.html", "text/html; charset=utf-8"),
-            "/panel.css", new Asset("panel.css", "text/css; charset=utf-8"),
-            "/panel.js", new Asset("panel.js", "text/javascript; charset=utf-8"));
-    private static final Set<String> LOCAL_HOSTS = Set.of("localhost", "127.0.0.1", "[::1]");
-    private static final String JSON = "application/json; charset=utf-8";
+    private static final Map<String, HttpSupport.Asset> ASSETS = Map.of(
+            "/", HttpSupport.Asset.of("index.html", "text/html; charset=utf-8"),
+            "/panel.css", HttpSupport.Asset.of("panel.css", "text/css; charset=utf-8"),
+            "/panel.js", HttpSupport.Asset.of("panel.js", "text/javascript; charset=utf-8"));
     private static final long HEARTBEAT_SECONDS = 15;
     private static final int MAX_PENDING_EVENTS = 500;
     private static final Pattern CALLS_PATH = Pattern.compile("/api/requests/(\\d{1,18})/calls");
@@ -60,17 +54,15 @@ public final class PanelServer {
 
     public static PanelServer start(int port, ReportStore store, List<String> profiledPackages,
                                     AppPackages application, SampleStore samples) throws IOException {
-        HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0);
-        ExecutorService executor = Executors.newCachedThreadPool(daemonThreads());
+        HttpServer server = HttpSupport.loopbackServer(port);
+        ExecutorService executor = HttpSupport.daemonThreads("queryscope-panel-");
         PanelServer panel = new PanelServer(server, executor, store, profiledPackages, application, samples);
-        server.createContext("/", localOnly(panel::serveAsset));
+        server.createContext("/", localOnly(exchange -> HttpSupport.serveAsset(exchange, ASSETS)));
         server.createContext("/api/requests", localOnly(panel::serveRequests));
         server.createContext("/api/profile", localOnly(panel::serveProfile));
         server.createContext("/api/events", localOnly(panel::streamEvents));
         server.setExecutor(executor);
-        Thread starter = new Thread(server::start, "queryscope-panel-start");
-        starter.setDaemon(true);
-        starter.start();
+        HttpSupport.startInBackground(server, "queryscope-panel-start");
         return panel;
     }
 
@@ -81,18 +73,6 @@ public final class PanelServer {
     public void stop() {
         server.stop(0);
         executor.shutdownNow();
-    }
-
-    private void serveAsset(HttpExchange exchange) throws IOException {
-        Asset asset = ASSETS.get(exchange.getRequestURI().getPath());
-        if (asset == null) {
-            respond(exchange, 404, null, new byte[0]);
-        } else if (!exchange.getRequestMethod().equals("GET")) {
-            respond(exchange, 405, null, new byte[0]);
-        } else {
-            exchange.getResponseHeaders().set("Cache-Control", "no-cache");
-            respond(exchange, 200, asset.contentType(), asset.content());
-        }
     }
 
     private void serveRequests(HttpExchange exchange) throws IOException {
@@ -137,7 +117,7 @@ public final class PanelServer {
         try {
             filter = ProfileQuery.parse(exchange.getRequestURI().getRawQuery(), store, samples);
         } catch (IllegalArgumentException e) {
-            respond(exchange, 400, "text/plain; charset=utf-8", utf8(e.getMessage()));
+            respond(exchange, 400, TEXT, utf8(e.getMessage()));
             return;
         }
         if (filter.isEmpty()) {
@@ -171,67 +151,5 @@ public final class PanelServer {
     private static void send(OutputStream body, String event) throws IOException {
         body.write(utf8(event));
         body.flush();
-    }
-
-    private static void respond(HttpExchange exchange, int status, String contentType, byte[] body) throws IOException {
-        if (contentType != null) {
-            exchange.getResponseHeaders().set("Content-Type", contentType);
-        }
-        exchange.sendResponseHeaders(status, body.length == 0 ? -1 : body.length);
-        try (OutputStream out = exchange.getResponseBody()) {
-            out.write(body);
-        }
-    }
-
-    private static HttpHandler localOnly(HttpHandler handler) {
-        return exchange -> {
-            if (LOCAL_HOSTS.contains(hostName(exchange.getRequestHeaders().getFirst("Host")))) {
-                handler.handle(exchange);
-            } else {
-                respond(exchange, 403, null, new byte[0]);
-            }
-        };
-    }
-
-    private static String hostName(String hostHeader) {
-        if (hostHeader == null) {
-            return "";
-        }
-        if (hostHeader.startsWith("[")) {
-            return hostHeader.substring(0, hostHeader.indexOf(']') + 1);
-        }
-        int colon = hostHeader.indexOf(':');
-        return colon < 0 ? hostHeader : hostHeader.substring(0, colon);
-    }
-
-    private static ThreadFactory daemonThreads() {
-        AtomicInteger counter = new AtomicInteger();
-        return task -> {
-            Thread thread = new Thread(task, "queryscope-panel-" + counter.incrementAndGet());
-            thread.setDaemon(true);
-            return thread;
-        };
-    }
-
-    private static byte[] utf8(String text) {
-        return text.getBytes(StandardCharsets.UTF_8);
-    }
-
-    private record Asset(String file, String contentType, byte[] content) {
-
-        private Asset(String file, String contentType) {
-            this(file, contentType, read(file));
-        }
-
-        private static byte[] read(String file) {
-            try (InputStream in = PanelServer.class.getResourceAsStream(file)) {
-                if (in == null) {
-                    throw new IllegalStateException("Missing panel asset " + file);
-                }
-                return in.readAllBytes();
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        }
     }
 }

@@ -2,6 +2,7 @@ package me.fertiz.queryscope.agent.launch;
 
 import me.fertiz.queryscope.agent.AgentConfig;
 
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
 import java.net.URISyntaxException;
@@ -14,14 +15,20 @@ public final class QueryScopeLauncher {
     private static final long STOP_TIMEOUT_SECONDS = 15;
     private static final int USAGE_ERROR = 2;
     private static final String USAGE = """
-            Usage: java -jar queryscope.jar [options] <app.jar> [app arguments]
+            Usage: java -jar queryscope.jar [options]
+                   java -jar queryscope.jar [options] --attach=<pid>
+                   java -jar queryscope.jar [options] <app.jar> [app arguments]
                    java -jar queryscope.jar [options] -cp <classpath> <main class> [app arguments]
 
-            Starts the application with the QueryScope agent attached and stops it on Ctrl+C.
+            Without an application, QueryScope starts its hub in the browser, which lists the Java
+            processes on this computer and attaches to the one you pick. --attach does the same for
+            one process from the command line. With an application, QueryScope starts it with the
+            agent attached and stops it on Ctrl+C.
 
             Options:
-              --port=7070                 port of the panel on localhost
+              --port=7070                 port of the hub, or of the panel when starting an application
               --open                      opens the panel in the browser once it is running
+              --open=false                keeps the hub from opening the browser
               --summary=false             skips the session summary printed when the application stops
               --nPlusOneThreshold=5       runs of the same SELECT, or write, in one request that are reported
               --slowQueryMs=100           queries at least this slow are reported
@@ -43,19 +50,28 @@ public final class QueryScopeLauncher {
     }
 
     public static void main(String[] arguments) throws Exception {
-        if (arguments.length == 0 || List.of(arguments).contains("--help")) {
+        if (List.of(arguments).contains("--help")) {
             System.out.print(USAGE);
             return;
         }
         LaunchCommand command;
+        HubCommand hub = null;
         try {
             command = LaunchCommand.parse(arguments);
-            AgentConfig.parse(command.agentOptionString());
+            if (command.target().isEmpty()) {
+                hub = HubCommand.parse(command.agentOptions());
+            } else {
+                AgentConfig.parse(command.agentOptionString());
+            }
         } catch (IllegalArgumentException e) {
             System.err.println(e.getMessage());
             System.err.println();
             System.err.print(USAGE);
             System.exit(USAGE_ERROR);
+            return;
+        }
+        if (hub != null) {
+            runHub(hub);
             return;
         }
         Process application = new ProcessBuilder(command.processCommand(
@@ -64,6 +80,19 @@ public final class QueryScopeLauncher {
                 .start();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> stop(application), "queryscope-launcher-stop"));
         System.exit(application.waitFor());
+    }
+
+    private static void runHub(HubCommand hub) throws Exception {
+        try {
+            hub.run(agentJar());
+        } catch (LinkageError e) {
+            System.err.println("Attaching needs a JDK with the jdk.attach module, and " + System.getProperty("java.home")
+                    + " has none. Run queryscope.jar with a JDK.");
+            System.exit(1);
+        } catch (IOException e) {
+            System.err.println(e.getMessage());
+            System.exit(1);
+        }
     }
 
     private static void stop(Process application) {

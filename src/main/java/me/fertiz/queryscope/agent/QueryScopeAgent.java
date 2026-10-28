@@ -20,18 +20,33 @@ import java.lang.instrument.Instrumentation;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class QueryScopeAgent {
+
+    public static final String PANEL_PORT_PROPERTY = "queryscope.panelPort";
 
     private static final System.Logger LOGGER = System.getLogger("QueryScope");
     private static final int STORED_REQUESTS = 200;
     private static final int STORED_SAMPLES = 200_000;
     private static final Duration SAMPLE_AGE = Duration.ofMinutes(15);
+    private static final AtomicBoolean STARTED = new AtomicBoolean();
 
     private QueryScopeAgent() {
     }
 
     public static void premain(String arguments, Instrumentation instrumentation) {
+        start(arguments, instrumentation);
+    }
+
+    public static void agentmain(String arguments, Instrumentation instrumentation) {
+        start(arguments, instrumentation);
+    }
+
+    private static void start(String arguments, Instrumentation instrumentation) {
+        if (!STARTED.compareAndSet(false, true)) {
+            return;
+        }
         AgentConfig config = AgentConfig.parse(arguments);
         QueryAnalyzer analyzer = new QueryAnalyzer(config.thresholds());
         ConsoleReporter console = new ConsoleReporter();
@@ -89,6 +104,7 @@ public final class QueryScopeAgent {
         try {
             PanelServer panel = PanelServer.start(config.port(), store, profiled.names(), application, samples);
             String url = "http://localhost:" + panel.port();
+            System.setProperty(PANEL_PORT_PROPERTY, String.valueOf(panel.port()));
             LOGGER.log(System.Logger.Level.INFO, "QueryScope panel is running at " + url);
             if (config.openPanel()) {
                 Browser.open(url);

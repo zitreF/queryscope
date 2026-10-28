@@ -30,7 +30,7 @@ public record LaunchCommand(List<String> agentOptions, List<String> target, List
             index++;
         }
         if (index == arguments.length) {
-            throw new IllegalArgumentException("Tell QueryScope which application to start");
+            return new LaunchCommand(agentOptions, List.of(), List.of());
         }
         List<String> target;
         if (CLASSPATH_FLAGS.contains(arguments[index])) {
