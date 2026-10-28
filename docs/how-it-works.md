@@ -124,8 +124,10 @@ The choices behind it:
   the same request.
 - **Tasks** start with the first query that runs outside a request. A task ends when its connection is closed or its
   transaction committed or rolled back, after a second without queries, or at 1000 queries, so a long batch splits
-  into readable pieces. It is named after the outermost method of your packages that is on the stack, or the nearest
-  application frame when there is no call tree.
+  into readable pieces. A task ended by its connection lasts until that moment; one that ends because it went idle or
+  something else started on the thread lasts until its last query or the last return from one of your methods,
+  whichever came later, so the wait for the next query never counts. It is named after the outermost method of your
+  packages that is on the stack, or the nearest application frame when there is no call tree.
 - **Entry tasks** start and end with a method named by `entry=`, so a whole job is one unit however many connections
   it opens.
 
@@ -240,6 +242,7 @@ Everything QueryScope keeps has a limit:
 | Reports without SQL           | the last 200, kept apart so they never push out the ones with SQL |
 | Call tree of one unit         | 1000 nodes, 100 levels                             |
 | Queries of one task           | 1000, then a new task starts                       |
+| Queries of a request or entry task | the first 1000 recorded, the rest only counted and timed |
 | Samples                       | 15 minutes, at most 200,000                        |
 | Session summary               | 500 endpoints, 200 distinct findings               |
 | Statements and result sets    | held weakly, gone with the application's objects   |

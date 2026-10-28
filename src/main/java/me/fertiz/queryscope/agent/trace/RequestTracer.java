@@ -36,7 +36,7 @@ public final class RequestTracer {
         if (inForegroundUnit()) {
             return false;
         }
-        finishCurrent(NO_STATUS);
+        finishTaskAtLastActivity();
         String path = queryString == null ? uri : uri + "?" + queryString;
         CURRENT.set(ActiveRequest.http(IDS.incrementAndGet(), method, path));
         return true;
@@ -50,7 +50,7 @@ public final class RequestTracer {
         if (inForegroundUnit()) {
             return false;
         }
-        finishCurrent(NO_STATUS);
+        finishTaskAtLastActivity();
         CURRENT.set(ActiveRequest.entry(IDS.incrementAndGet(), CallSites.shortName(qualifiedName)));
         return true;
     }
@@ -89,7 +89,7 @@ public final class RequestTracer {
     public static void queryStarted() {
         ActiveRequest current = CURRENT.get();
         if (current != null && current.isBackground() && current.isExpired(System.nanoTime())) {
-            finishCurrent(NO_STATUS);
+            finishTaskAtLastActivity();
             current = null;
         }
         if (current == null) {
@@ -101,18 +101,29 @@ public final class RequestTracer {
 
     public static void queryFinished(String sql, boolean failed, Object result) {
         ActiveRequest request = CURRENT.get();
-        if (request != null && request.leaveOutermostQuery() && sql != null) {
+        if (request == null || !request.leaveOutermostQuery() || sql == null) {
+            return;
+        }
+        if (request.hasRoomForQueries()) {
             watchRows(request.addQuery(sql, "", failed, CallSites.callSite()), result);
+        } else {
+            request.omitQuery();
         }
     }
 
     public static void preparedQueryFinished(Object statement, boolean failed, Object result) {
         ActiveRequest request = CURRENT.get();
-        if (request != null && request.leaveOutermostQuery()) {
-            StatementState state = STATEMENTS.get(statement);
-            if (state != null) {
-                watchRows(request.addQuery(state.sql(), state.parameters(), failed, CallSites.callSite()), result);
-            }
+        if (request == null || !request.leaveOutermostQuery()) {
+            return;
+        }
+        StatementState state = STATEMENTS.get(statement);
+        if (state == null) {
+            return;
+        }
+        if (request.hasRoomForQueries()) {
+            watchRows(request.addQuery(state.sql(), state.parameters(), failed, CallSites.callSite()), result);
+        } else {
+            request.omitQuery();
         }
     }
 
@@ -136,11 +147,21 @@ public final class RequestTracer {
 
     private static void finishCurrent(int status) {
         ActiveRequest request = CURRENT.get();
-        if (request == null) {
-            return;
+        if (request != null) {
+            finish(request, status, System.nanoTime());
         }
+    }
+
+    private static void finishTaskAtLastActivity() {
+        ActiveRequest request = CURRENT.get();
+        if (request != null) {
+            finish(request, NO_STATUS, request.lastActivityNanos());
+        }
+    }
+
+    private static void finish(ActiveRequest request, int status, long endNanos) {
         CURRENT.remove();
-        RequestTrace trace = request.finish(status);
+        RequestTrace trace = request.finish(status, endNanos);
         try {
             listener.accept(trace);
         } catch (RuntimeException e) {

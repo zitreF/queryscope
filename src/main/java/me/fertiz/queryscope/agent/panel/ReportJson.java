@@ -64,7 +64,10 @@ final class ReportJson {
                 .name("durationMs").value(millis(trace.durationNanos()))
                 .name("queries").beginArray();
         trace.queries().forEach(query -> write(json, query));
-        json.endArray().name("findings").beginArray();
+        json.endArray()
+                .name("omittedQueries").value(trace.omittedQueries())
+                .name("omittedMs").value(millis(trace.omittedNanos()))
+                .name("findings").beginArray();
         report.findings().forEach(finding -> write(json, finding));
         json.endArray()
                 .name("methods").value(trace.callTree().methods())

@@ -13,7 +13,7 @@ public final class ConsoleReporter {
 
     public void log(RequestReport report) {
         RequestTrace trace = report.trace();
-        int queries = trace.queries().size();
+        int queries = trace.queryCount();
         String unit = trace.kind() == UnitKind.HTTP
                 ? String.format(Locale.ROOT, "%s %s -> %d", trace.method(), trace.path(), trace.status())
                 : trace.endpoint();

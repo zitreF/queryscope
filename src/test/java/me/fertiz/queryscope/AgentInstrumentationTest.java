@@ -9,9 +9,12 @@ import jakarta.servlet.ServletRequest;
 import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import me.fertiz.queryscope.agent.AgentConfig;
 import me.fertiz.queryscope.agent.AgentInstaller;
 import me.fertiz.queryscope.agent.calltree.AppPackages;
 import me.fertiz.queryscope.agent.calltree.CallNode;
+import me.fertiz.queryscope.agent.findings.QueryAnalyzer;
+import me.fertiz.queryscope.agent.findings.TooManyQueries;
 import me.fertiz.queryscope.agent.trace.QueryExecution;
 import me.fertiz.queryscope.agent.trace.RequestTrace;
 import me.fertiz.queryscope.agent.trace.RequestTracer;
@@ -30,6 +33,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -42,6 +47,7 @@ class AgentInstrumentationTest {
 
     private static final List<RequestTrace> TRACES = new CopyOnWriteArrayList<>();
     private static final String BY_ID = "select title from books where id = ?";
+    private static final long PAUSE_MILLIS = 200;
 
     private static HikariDataSource dataSource;
 
@@ -195,6 +201,51 @@ class AgentInstrumentationTest {
     }
 
     @Test
+    void taskEndsWhenItsConnectionIsReleasedRatherThanAtItsLastQuery() throws Exception {
+        new BookCatalog(dataSource).titlesThenPause(PAUSE_MILLIS, 1, 2);
+
+        RequestTrace trace = singleTrace();
+        assertEquals(2, trace.queries().size());
+        assertTrue(trace.durationNanos() >= Duration.ofMillis(PAUSE_MILLIS).toNanos(), trace.toString());
+        assertEveryCallFitsIn(trace);
+    }
+
+    @Test
+    void taskLeftOpenEndsAfterTheLastMethodItRan() throws Exception {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.executeQuery("select count(*) from books").close();
+            new BookCatalog(dataSource).pause(PAUSE_MILLIS);
+            handle(request(DispatcherType.REQUEST, "/books"), AgentInstrumentationTest::findTitle);
+        }
+
+        RequestTrace task = TRACES.get(0);
+        assertEquals(UnitKind.TASK, task.kind());
+        assertTrue(task.durationNanos() >= Duration.ofMillis(PAUSE_MILLIS).toNanos(), task.toString());
+        assertEveryCallFitsIn(task);
+    }
+
+    @Test
+    void recordsTheFirstThousandQueriesAndCountsTheRest() {
+        handle(request(DispatcherType.REQUEST, "/import"), () -> {
+            try (Connection connection = dataSource.getConnection();
+                 PreparedStatement statement = connection.prepareStatement(BY_ID)) {
+                for (int query = 0; query < 1500; query++) {
+                    statement.setInt(1, 1);
+                    statement.executeQuery().close();
+                }
+            }
+        });
+
+        RequestTrace trace = singleTrace();
+        assertEquals(1000, trace.queries().size());
+        assertEquals(500, trace.omittedQueries());
+        assertEquals(1500, trace.queryCount());
+        assertTrue(trace.databaseNanos() > trace.queries().stream().mapToLong(QueryExecution::durationNanos).sum());
+        assertTrue(new QueryAnalyzer(AgentConfig.DEFAULTS.thresholds()).analyze(trace).findings().stream()
+                .anyMatch(finding -> finding instanceof TooManyQueries tooMany && tooMany.queries() == 1500));
+    }
+
+    @Test
     void pointsAtApplicationCodeThatRanTheQuery() {
         handle(request(DispatcherType.REQUEST, "/books"), AgentInstrumentationTest::findTitle);
 
@@ -254,6 +305,16 @@ class AgentInstrumentationTest {
         assertEquals("BookCatalog.titles", trace.path());
         assertTrue(titles.startedBeforeUnit());
         assertEquals(List.of(0, 1), single(titles.children()).queryIndexes());
+    }
+
+    private static void assertEveryCallFitsIn(RequestTrace trace) {
+        List<CallNode> nodes = new ArrayList<>(trace.callTree().calls());
+        assertFalse(nodes.isEmpty(), trace.toString());
+        while (!nodes.isEmpty()) {
+            CallNode node = nodes.remove(nodes.size() - 1);
+            assertTrue(node.totalNanos() <= trace.durationNanos(), node + " in " + trace.durationNanos() + " ns");
+            nodes.addAll(node.children());
+        }
     }
 
     private static CallNode single(List<CallNode> nodes) {

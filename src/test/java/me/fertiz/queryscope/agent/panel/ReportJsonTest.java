@@ -28,7 +28,8 @@ class ReportJsonTest {
                 + "{\"sql\":\"select * from orders where customer_id = 1\",\"parameters\":\"\",\"offsetMs\":1.000,"
                 + "\"durationMs\":0.500,\"rows\":3,\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"failed\":false},"
                 + "{\"sql\":\"select * from orders where customer_id = 2\",\"parameters\":\"\",\"offsetMs\":2.000,"
-                + "\"durationMs\":120.000,\"rows\":null,\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"failed\":true}],\"findings\":["
+                + "\"durationMs\":120.000,\"rows\":null,\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"failed\":true}],"
+                + "\"omittedQueries\":0,\"omittedMs\":0.000,\"findings\":["
                 + "{\"type\":\"nPlusOne\",\"sql\":\"select * from orders where customer_id = ?\","
                 + "\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"executions\":2,\"totalMs\":120.500,"
                 + "\"queryIndexes\":[0,1]},"
@@ -46,11 +47,11 @@ class ReportJsonTest {
         assertEquals("[{\"id\":2,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/b\",\"status\":200,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":2.000,\"queries\":[{\"sql\":\"select 1\","
                 + "\"parameters\":\"\",\"offsetMs\":0.500,\"durationMs\":0.250,\"rows\":1,\"callSite\":null,\"failed\":false}],"
-                + "\"findings\":[],\"methods\":0},"
+                + "\"omittedQueries\":0,\"omittedMs\":0.000,\"findings\":[],\"methods\":0},"
                 + "{\"id\":1,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/a\",\"status\":200,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":2.000,\"queries\":[{\"sql\":\"select 1\","
                 + "\"parameters\":\"\",\"offsetMs\":0.500,\"durationMs\":0.250,\"rows\":1,\"callSite\":null,\"failed\":false}],"
-                + "\"findings\":[],\"methods\":0}]", json);
+                + "\"omittedQueries\":0,\"omittedMs\":0.000,\"findings\":[],\"methods\":0}]", json);
     }
 
     @Test
@@ -80,11 +81,21 @@ class ReportJsonTest {
     }
 
     @Test
+    void writesHowManyQueriesWereLeftOut() {
+        RequestTrace trace = new RequestTrace(5, UnitKind.TASK, "TASK", "ImportJob.run", 0, Reports.STARTED_AT,
+                9_000_000, List.of(), CallTree.EMPTY, 0, 1, 500, 2_500_000);
+
+        String json = ReportJson.event(new RequestReport(trace, List.of()));
+
+        assertTrue(json.contains("\"queries\":[],\"omittedQueries\":500,\"omittedMs\":2.500,"), json);
+    }
+
+    @Test
     void writesTheCallTreeWithItsQueries() {
         CallNode toDto = new CallNode("com.acme.Mapper.toDto", 2, 600_000, 600_000, false, List.of(0, 1), List.of());
         CallNode list = new CallNode("com.acme.Service.list", 1, 1_000_000, 400_000, true, List.of(), List.of(toDto));
         RequestTrace trace = new RequestTrace(4, UnitKind.HTTP, "GET", "/orders", 200, Reports.STARTED_AT, 2_000_000,
-                List.of(), new CallTree(List.of(list), List.of(2), false), 3, 1);
+                List.of(), new CallTree(List.of(list), List.of(2), false), 3, 1, 0, 0);
 
         String json = ReportJson.calls(new RequestReport(trace, List.of()), List.of("com.acme"));
 

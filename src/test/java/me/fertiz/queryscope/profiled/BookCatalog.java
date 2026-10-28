@@ -26,6 +26,21 @@ public final class BookCatalog {
         return titles;
     }
 
+    public List<String> titlesThenPause(long pauseMillis, int... ids) throws SQLException, InterruptedException {
+        try (Connection connection = dataSource.getConnection()) {
+            List<String> titles = new ArrayList<>();
+            for (int id : ids) {
+                titles.add(title(connection, id));
+            }
+            pause(pauseMillis);
+            return titles;
+        }
+    }
+
+    public void pause(long millis) throws InterruptedException {
+        Thread.sleep(millis);
+    }
+
     public int depth(int levels) {
         return levels == 0 ? 0 : 1 + depth(levels - 1);
     }

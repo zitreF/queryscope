@@ -45,6 +45,10 @@ public final class CallTracer {
         }
     }
 
+    public static long lastExitNanos(CallTreeBuilder tree) {
+        return tree == null ? 0 : tree.lastExitNanos();
+    }
+
     public static CallTree unitFinished(CallTreeBuilder tree, long endNanos) {
         if (tree == null) {
             return CallTree.EMPTY;
@@ -135,6 +139,7 @@ public final class CallTracer {
         private void close(int index, long nowNanos) {
             if (nodes[index] != null && !recursive[index]) {
                 nodes[index].spent(nowNanos - starts[index]);
+                tree.methodExited(nowNanos);
             }
             nodes[index] = null;
         }

@@ -17,7 +17,9 @@ public record RequestTrace(
         List<QueryExecution> queries,
         CallTree callTree,
         long classesLoaded,
-        long threadId
+        long threadId,
+        int omittedQueries,
+        long omittedNanos
 ) {
 
     public static final int WARM_UP_CLASSES = 50;
@@ -28,15 +30,19 @@ public record RequestTrace(
 
     public RequestTrace(long id, UnitKind kind, String method, String path, int status, Instant startedAt,
                         long durationNanos, List<QueryExecution> queries) {
-        this(id, kind, method, path, status, startedAt, durationNanos, queries, CallTree.EMPTY, 0, 0);
+        this(id, kind, method, path, status, startedAt, durationNanos, queries, CallTree.EMPTY, 0, 0, 0, 0);
     }
 
     public boolean isWarmUp() {
         return classesLoaded >= WARM_UP_CLASSES;
     }
 
+    public int queryCount() {
+        return queries.size() + omittedQueries;
+    }
+
     public long databaseNanos() {
-        return queries.stream().mapToLong(QueryExecution::durationNanos).sum();
+        return queries.stream().mapToLong(QueryExecution::durationNanos).sum() + omittedNanos;
     }
 
     public Instant endedAt() {

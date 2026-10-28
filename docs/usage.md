@@ -332,6 +332,9 @@ The panel is backed by a small JSON API on the same port:
 | `GET /api/requests/{id}/calls` | the call tree of one stored request, with the queries of each method                  |
 | `GET /api/profile`             | a flame graph and the hot methods                                                     |
 
+A request or entry task keeps its first 1000 queries in `queries`; any beyond that are counted in `omittedQueries` and
+their time in `omittedMs`, and they still count for *Too many queries* and the time in the database.
+
 `/api/profile` takes `window` (seconds, default 300), `thread` (an ID or `all`), `frames` (`all` or `app`), `samples`
 (`cpu` or `all`), and `request` with `scope` (`request` or `endpoint`) to look at one request or its endpoint.
 

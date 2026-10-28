@@ -14,9 +14,18 @@ public final class CallTreeBuilder {
     private final Node root = new Node(null, 0);
     private int nodes;
     private boolean truncated;
+    private long lastExitNanos;
 
     Node root() {
         return root;
+    }
+
+    long lastExitNanos() {
+        return lastExitNanos;
+    }
+
+    void methodExited(long nanos) {
+        lastExitNanos = nanos;
     }
 
     Node child(Node parent, String method) {

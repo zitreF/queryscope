@@ -265,7 +265,8 @@ function enrich(report) {
         javaFindings,
         start,
         end: start + report.durationMs,
-        dbMs: report.queries.reduce((sum, query) => sum + query.durationMs, 0),
+        queryCount: report.queries.length + report.omittedQueries,
+        dbMs: report.queries.reduce((sum, query) => sum + query.durationMs, report.omittedMs),
         endpointPath: endpointPath(report.path),
         severity: types.has('nPlusOne') ? 'n-plus-one' : types.has('slowQuery') ? 'slow' : types.size > 0 ? 'warn' : 'ok',
         types,
@@ -441,7 +442,7 @@ function renderStats() {
     const end = now();
     const from = end - KPI_WINDOW_MS;
     const recent = state.sqlReports.filter(report => report.view.end > from && report.view.end <= end);
-    const queries = recent.reduce((sum, report) => sum + report.queries.length, 0);
+    const queries = recent.reduce((sum, report) => sum + report.view.queryCount, 0);
     const duration = recent.reduce((sum, report) => sum + report.durationMs, 0);
     const db = recent.reduce((sum, report) => sum + report.view.dbMs, 0);
     const withNPlusOne = state.sqlReports.filter(report => report.view.types.has('nPlusOne'));
@@ -453,7 +454,7 @@ function renderStats() {
             sub: `${plural(state.sqlReports.length, 'request', 'requests')} kept`, series: series(end, () => 1)},
         {key: 'queries', label: 'Queries per minute', value: queries,
             sub: recent.length > 0 ? `${(queries / recent.length).toFixed(1)} per request` : 'No requests in the last minute',
-            series: series(end, report => report.queries.length)},
+            series: series(end, report => report.view.queryCount)},
         {key: 'db', label: 'Time in database', value: duration > 0 ? Math.round(db / duration * 100) : 0, unit: '%',
             sub: `${formatMs(db)} of ${formatMs(duration)} in the last minute`,
             series: dbSeries.map((value, index) => durationSeries[index] > 0 ? value / durationSeries[index] : 0)},
@@ -885,7 +886,7 @@ function laneCount() {
 
 function barWidth(report, width) {
     const durationWidth = report.durationMs / state.windowMs * width;
-    return Math.max(durationWidth, 8 + Math.min(80, report.queries.length * 1.6));
+    return Math.max(durationWidth, 8 + Math.min(80, report.view.queryCount * 1.6));
 }
 
 function relayoutLanes() {
@@ -982,7 +983,7 @@ function hover(event) {
         el('div', {class: 'tooltip-meta'}, [
             isTask(report) ? 'Task' : `HTTP ${report.status}`,
             formatMs(report.durationMs),
-            plural(report.queries.length, 'query', 'queries'),
+            plural(report.view.queryCount, 'query', 'queries'),
             `${formatMs(report.view.dbMs)} in database`,
         ].join(' · ')),
         report.view.sqlFindings.length > 0
@@ -1005,7 +1006,7 @@ function renderEndpoints() {
             calls: 0, queries: 0, duration: 0, db: 0, types: new Set(),
         };
         group.calls++;
-        group.queries += report.queries.length;
+        group.queries += report.view.queryCount;
         group.duration += report.durationMs;
         group.db += report.view.dbMs;
         report.view.types.forEach(type => group.types.add(type));
@@ -1119,7 +1120,7 @@ function requestItem(report, index) {
             isTask(report)
                 ? el('span', {}, 'Task')
                 : el('span', {class: report.status >= 400 ? 'status-error' : ''}, String(report.status)),
-            el('span', {}, plural(report.queries.length, 'query', 'queries')),
+            el('span', {}, plural(report.view.queryCount, 'query', 'queries')),
             el('span', {}, formatMs(report.durationMs)),
             report.view.sqlFindings.map(findingLabel)));
 }
@@ -1142,7 +1143,7 @@ function renderDetails(report) {
             el('dl', {class: 'facts'},
                 isTask(report) ? fact('Kind', 'Task outside HTTP') : fact('Status', String(report.status)),
                 fact('Duration', formatMs(report.durationMs)),
-                fact('Queries', String(report.queries.length)),
+                fact('Queries', formatCount(report.view.queryCount)),
                 fact('Time in database', formatMs(report.view.dbMs)),
                 fact('Started', new Date(report.view.start).toLocaleTimeString()))),
         el('h3', {class: 'section-title'}, 'Findings'),
@@ -1150,6 +1151,8 @@ function renderDetails(report) {
         el('h3', {class: 'section-title'}, 'Timeline'),
         timeline(report, roles),
         el('h3', {class: 'section-title'}, 'Queries'),
+        ...(report.omittedQueries > 0 ? [el('p', {class: 'empty'}, `First ${formatCount(report.queries.length)} of `
+            + `${formatCount(report.view.queryCount)} queries. The rest count in the totals but are not listed.`)] : []),
         queryTable(report, roles));
 }
 

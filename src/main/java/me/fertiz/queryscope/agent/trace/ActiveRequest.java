@@ -8,6 +8,7 @@ import java.lang.management.ClassLoadingMXBean;
 import java.lang.management.ManagementFactory;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -16,7 +17,7 @@ final class ActiveRequest {
     private static final String TASK_METHOD = "TASK";
     private static final ClassLoadingMXBean CLASSES = ManagementFactory.getClassLoadingMXBean();
     private static final long BACKGROUND_IDLE_NANOS = TimeUnit.SECONDS.toNanos(1);
-    private static final int BACKGROUND_MAX_QUERIES = 1000;
+    static final int MAX_RECORDED_QUERIES = 1000;
 
     private final long id;
     private final UnitKind kind;
@@ -32,6 +33,8 @@ final class ActiveRequest {
     private int queryDepth;
     private long queryStartedNanos;
     private long queryFinishedNanos = startedNanos;
+    private int omittedQueries;
+    private long omittedNanos;
 
     private ActiveRequest(long id, UnitKind kind, String method, String path, boolean background) {
         this.id = id;
@@ -63,7 +66,11 @@ final class ActiveRequest {
 
     boolean isExpired(long nanos) {
         return queryDepth == 0
-                && (nanos - queryFinishedNanos > BACKGROUND_IDLE_NANOS || queries.size() >= BACKGROUND_MAX_QUERIES);
+                && (nanos - queryFinishedNanos > BACKGROUND_IDLE_NANOS || !hasRoomForQueries());
+    }
+
+    boolean hasRoomForQueries() {
+        return queries.size() < MAX_RECORDED_QUERIES;
     }
 
     void enterQuery() {
@@ -93,12 +100,24 @@ final class ActiveRequest {
         return query;
     }
 
-    RequestTrace finish(int status) {
-        long endNanos = background ? queryFinishedNanos : System.nanoTime();
+    void omitQuery() {
+        omittedQueries++;
+        omittedNanos += queryFinishedNanos - queryStartedNanos;
+    }
+
+    long lastActivityNanos() {
+        return Math.max(queryFinishedNanos, CallTracer.lastExitNanos(calls));
+    }
+
+    RequestTrace finish(int status, long endNanos) {
         CallTree callTree = CallTracer.unitFinished(calls, endNanos);
+        List<QueryExecution> executions = new ArrayList<>(queries.size());
+        for (QueryRecord query : queries) {
+            executions.add(query.toExecution());
+        }
         return new RequestTrace(
                 id, kind, method, path, status, startedAt, endNanos - startedNanos,
-                queries.stream().map(QueryRecord::toExecution).toList(), callTree,
-                CLASSES.getTotalLoadedClassCount() - classesAtStart, threadId);
+                Collections.unmodifiableList(executions), callTree,
+                CLASSES.getTotalLoadedClassCount() - classesAtStart, threadId, omittedQueries, omittedNanos);
     }
 }

@@ -40,8 +40,8 @@ public final class QueryAnalyzer {
         if (!trace.isWarmUp()) {
             findings.addAll(slowMethods(trace));
         }
-        if (queries.size() >= thresholds.maxQueries()) {
-            findings.add(new TooManyQueries(queries.size(), thresholds.maxQueries(), trace.databaseNanos(),
+        if (trace.queryCount() >= thresholds.maxQueries()) {
+            findings.add(new TooManyQueries(trace.queryCount(), thresholds.maxQueries(), trace.databaseNanos(),
                     trace.durationNanos()));
         }
         return new RequestReport(trace, List.copyOf(findings));

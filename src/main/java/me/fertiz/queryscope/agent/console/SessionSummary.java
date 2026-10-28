@@ -44,7 +44,7 @@ public final class SessionSummary implements Consumer<RequestReport> {
     public synchronized void accept(RequestReport report) {
         RequestTrace trace = report.trace();
         units++;
-        queries += trace.queries().size();
+        queries += trace.queryCount();
         String name = trace.endpoint();
         EndpointStats endpoint = endpoints.get(name);
         if (endpoint == null && endpoints.size() < MAX_ENDPOINTS) {
@@ -182,7 +182,7 @@ public final class SessionSummary implements Consumer<RequestReport> {
 
         private void add(RequestReport report) {
             calls++;
-            queries += report.trace().queries().size();
+            queries += report.trace().queryCount();
             durationNanos += report.trace().durationNanos();
             databaseNanos += report.trace().databaseNanos();
             report.findings().forEach(finding -> badges.add(FindingText.badge(finding)));
