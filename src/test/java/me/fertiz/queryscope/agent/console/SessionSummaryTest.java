@@ -83,8 +83,10 @@ class SessionSummaryTest {
     @Test
     void countsADuplicateQueryOnceWhateverItsParameters() {
         String sql = "select * from customers where id = ?";
-        summary.accept(http("/api/customers/7/card", 2, List.of(new DuplicateQuery(sql, "[7]", MAPPER, List.of(0, 1)))));
-        summary.accept(http("/api/customers/8/card", 2, List.of(new DuplicateQuery(sql, "[8]", MAPPER, List.of(0, 1)))));
+        DuplicateQuery seven = new DuplicateQuery(sql, "[7]", MAPPER, List.of(0, 1));
+        DuplicateQuery eight = new DuplicateQuery(sql, "[8]", MAPPER, List.of(0, 1));
+        summary.accept(http("/api/customers/7/card", 2, List.of(seven)));
+        summary.accept(http("/api/customers/8/card", 2, List.of(eight)));
 
         String output = print();
 

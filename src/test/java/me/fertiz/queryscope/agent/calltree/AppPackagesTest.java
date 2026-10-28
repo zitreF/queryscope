@@ -64,6 +64,19 @@ class AppPackagesTest {
         assertFalse(packages.covers("com.acme.shop.Customer$HibernateProxy$x1y2"));
     }
 
+    @Test
+    void coversExplicitPackagesInsideFrameworkNamespaces() {
+        AppPackages petClinic = AppPackages.of(List.of("org.springframework.samples.petclinic"));
+
+        assertTrue(petClinic.covers("org.springframework.samples.petclinic.owner.OwnerController"));
+        assertFalse(petClinic.covers("org.springframework.web.servlet.DispatcherServlet"));
+    }
+
+    @Test
+    void neverCoversQueryScopeItself() {
+        assertFalse(AppPackages.of(List.of("me.fertiz")).covers("me.fertiz.queryscope.agent.trace.RequestTracer"));
+    }
+
     private static Path jar(Path path, String mainClass, String startClass) throws IOException {
         Files.createDirectories(path.getParent());
         Manifest manifest = new Manifest();

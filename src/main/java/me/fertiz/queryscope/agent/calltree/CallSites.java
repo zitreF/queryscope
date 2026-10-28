@@ -39,8 +39,12 @@ public final class CallSites {
         return qualifiedMethod.substring(typeDot + 1);
     }
 
+    static boolean isGenerated(String className) {
+        return className.contains("$$") || className.contains("$HibernateProxy");
+    }
+
     static boolean isApplicationCode(String className) {
-        if (className.contains("$$") || className.contains("$HibernateProxy")) {
+        if (isGenerated(className)) {
             return false;
         }
         for (String framework : FRAMEWORK_PACKAGES) {

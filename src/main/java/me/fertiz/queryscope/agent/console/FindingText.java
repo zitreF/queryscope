@@ -63,7 +63,8 @@ final class FindingText {
                 SlowMethod slow = (SlowMethod) finding;
                 yield String.format(Locale.ROOT, "Slow method: %s spent %.1f ms in its own code outside SQL over %d %s,"
                                 + " %.0f%% of the time", CallSites.shortName(slow.method()), millis(slow.ownNanos()),
-                        slow.calls(), slow.calls() == 1 ? "call" : "calls", share(slow.ownNanos(), slow.durationNanos()));
+                        slow.calls(), slow.calls() == 1 ? "call" : "calls",
+                        share(slow.ownNanos(), slow.durationNanos()));
             }
         };
     }

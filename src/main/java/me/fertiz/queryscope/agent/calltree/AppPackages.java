@@ -1,5 +1,7 @@
 package me.fertiz.queryscope.agent.calltree;
 
+import me.fertiz.queryscope.agent.QueryScopeAgent;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
@@ -43,7 +45,7 @@ public final class AppPackages {
     }
 
     public boolean covers(String typeName) {
-        return CallSites.isApplicationCode(typeName)
+        return !CallSites.isGenerated(typeName) && !typeName.startsWith(QueryScopeAgent.PACKAGE)
                 && packages.stream().anyMatch(name -> typeName.startsWith(name + "."));
     }
 

@@ -197,8 +197,9 @@ prints its table from a shutdown hook, together with the hottest methods of the 
   `jdk.NativeMethodSample` at `sampleMs` and consumes it on a daemon thread of its own (the stream's own thread from
   `startAsync` is not a daemon and would keep the JVM alive). For each event it keeps the thread, the time, the frames
   as `Class.method` and whether the stack was truncated. Hidden class suffixes such as `/0x0000…` are dropped, so the
-  frames of the same lambda form merge. Where Flight Recorder is missing, `ThreadDumpSampler` calls
-  `Thread.getAllStackTraces()` every 20 ms or more and keeps runnable threads.
+  frames of the same lambda form merge. Where Flight Recorder is missing, or its stream fails to start, for example
+  because it cannot write its repository, `ThreadDumpSampler` calls `Thread.getAllStackTraces()` every 20 ms or more
+  and keeps runnable threads.
 - **Storage.** `SampleStore` keeps the samples of the last 15 minutes, at most 200,000, as method IDs. Identical stacks
   are stored once, so a hot loop sampled thousands of times costs one array.
 - **On exit** the stream is stopped, which on Java 20 and newer waits until the last events are consumed, so the
@@ -268,11 +269,14 @@ visible right after attaching to a large application.
 
 - **Unit tests** for the SQL normalizer, the analyzer, the options, the launcher and hub command lines, parameter
   formatting, the session summary, the call stack, package detection, the sample store, profiles, the JSON writer, the
-  report store and the panel and hub servers, including SSE, the `Host` check and the attach protection.
-- **`SamplingTest`** runs the Flight Recorder sampler and the thread dump sampler against a busy thread.
+  report store, the port fallback, a startup that fails, and the panel and hub servers, including SSE, the `Host`
+  check, the frame headers and the attach protection.
+- **`SamplingTest`** runs the Flight Recorder sampler and the thread dump sampler against a busy thread, and
+  `JfrSamplerTest` checks the switch to thread dumps when the stream fails to start.
 - **`AgentInstrumentationTest`** installs the agent into the test JVM with ByteBuddyAgent and runs real queries
   through HikariCP and H2 inside simulated `jakarta.servlet` and `javax.servlet` requests, outside any request and
-  inside an `entry=` method, and checks the call tree of a profiled fixture class with recursion and exceptions.
+  inside an `entry=` method, and checks the call tree of a profiled fixture class with recursion and exceptions, that
+  a task's call tree fits in its duration, and that a request past 1000 queries counts the rest.
 - **`QueryScopeEndToEndTest`** starts the demo shop with `-javaagent:queryscope.jar` in a separate JVM and checks every
   finding, the call tree and the Flight Recorder samples through the panel's API. The demo runs on the test classpath
   without the agent's own classes, so only the shaded jar is attached.

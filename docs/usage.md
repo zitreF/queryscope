@@ -412,7 +412,8 @@ production.
   requests. Their queries still show up as tasks.
 - `Statement.addBatch(sql)` batches are not recorded. Prepared statement batches are.
 - Call sites skip `org.springframework.*` frames, so apps whose own code lives under that package, such as Spring
-  PetClinic, show the nearest frame outside it.
+  PetClinic, show the nearest frame outside it. QueryScope cannot detect such a package from the main class either;
+  pass it with `--package=org.springframework.samples.petclinic` to get the call tree and the *Your code* views.
 - The call tree costs a few dozen nanoseconds per call of your methods. A tight loop that calls tiny methods millions
   of times gets noticeably slower; `profile=false` turns the call tree off.
 - Flight Recorder samples only threads running Java code, skips threads inside some JVM stubs such as array copies,

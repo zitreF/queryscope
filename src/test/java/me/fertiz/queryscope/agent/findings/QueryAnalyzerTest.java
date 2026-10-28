@@ -125,8 +125,9 @@ class QueryAnalyzerTest {
         RequestTrace trace = new RequestTrace(1, UnitKind.HTTP, "GET", "/import", 200, Instant.now(),
                 Duration.ofMillis(50).toNanos(), queries, CallTree.EMPTY, 0, 1, 40, Duration.ofMillis(8).toNanos());
 
-        assertEquals(List.of(new TooManyQueries(41, 10, Duration.ofMillis(10).toNanos(), Duration.ofMillis(50).toNanos())),
-                analyzer.analyze(trace).findings());
+        TooManyQueries expected = new TooManyQueries(41, 10, Duration.ofMillis(10).toNanos(),
+                Duration.ofMillis(50).toNanos());
+        assertEquals(List.of(expected), analyzer.analyze(trace).findings());
     }
 
     @Test
