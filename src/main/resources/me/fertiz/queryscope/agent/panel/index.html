@@ -36,6 +36,7 @@
             </button>
         </div>
         <div class="subtab-group" data-area="java" hidden>
+            <button type="button" class="subtab" data-view="java/profile" aria-controls="view-profile">Profiler</button>
             <button type="button" class="subtab" data-view="java/calls" aria-controls="view-calls">
                 Call trees <span class="tab-count" id="call-count">0</span>
             </button>
@@ -104,6 +105,49 @@
             </aside>
             <article class="details" id="details"></article>
         </div>
+    </section>
+
+    <section class="view" id="view-profile" role="tabpanel" hidden>
+        <section class="panel">
+            <div class="panel-header">
+                <div>
+                    <h2>Profiler</h2>
+                    <p class="panel-hint" id="profile-status">Loading samples…</p>
+                </div>
+                <div class="profile-controls">
+                    <div class="segmented" id="profile-window" role="group" aria-label="Time window"></div>
+                    <select class="select" id="profile-thread" aria-label="Thread"></select>
+                    <div class="segmented" id="profile-frames" role="group" aria-label="Frames"></div>
+                    <div class="segmented" id="profile-samples" role="group" aria-label="Samples"></div>
+                </div>
+            </div>
+            <div class="profile-scope" id="profile-scope" hidden></div>
+            <div class="profile-toolbar">
+                <input type="search" class="search" id="profile-search" placeholder="Find a method" aria-label="Find a method">
+                <span class="profile-zoom" id="profile-zoom"></span>
+                <button type="button" class="text-button" id="profile-reset" hidden>Reset zoom</button>
+            </div>
+            <div class="flame-wrap">
+                <div class="flame" id="flame"></div>
+                <div class="flame-tooltip" id="flame-tooltip" hidden></div>
+            </div>
+            <div class="legend flame-legend">
+                <span class="app">Your code</span>
+                <span class="lib">Libraries and frameworks</span>
+                <span class="jdk">JDK</span>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-header">
+                <div>
+                    <h2>Hot methods</h2>
+                    <p class="panel-hint" id="hot-hint">Where the CPU samples were taken</p>
+                </div>
+                <div class="segmented" id="hot-mode" role="group" aria-label="Methods"></div>
+            </div>
+            <div id="hot-list"></div>
+        </section>
     </section>
 
     <section class="view" id="view-calls" role="tabpanel" hidden>

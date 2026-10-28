@@ -1,5 +1,7 @@
 package me.fertiz.queryscope.agent.panel;
 
+import me.fertiz.queryscope.agent.profile.SampleStore;
+import me.fertiz.queryscope.agent.trace.AppPackages;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,6 +16,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Iterator;
 import java.util.List;
@@ -27,11 +30,12 @@ class PanelServerTest {
 
     private final HttpClient client = HttpClient.newHttpClient();
     private final ReportStore store = new ReportStore(10);
+    private final SampleStore samples = new SampleStore(Clock.systemUTC(), 100, Duration.ofMinutes(5));
     private PanelServer panel;
 
     @BeforeEach
     void startPanel() throws IOException {
-        panel = PanelServer.start(0, store, List.of("com.acme"));
+        panel = PanelServer.start(0, store, List.of("com.acme"), AppPackages.of(List.of("com.acme")), samples);
     }
 
     @AfterEach
@@ -75,6 +79,24 @@ class PanelServerTest {
         assertEquals(404, get("/api/requests/5/queries").statusCode());
         assertEquals(405, client.send(request("/api/requests/5/calls").DELETE().build(),
                 HttpResponse.BodyHandlers.discarding()).statusCode());
+    }
+
+    @Test
+    void servesAFlameGraphOfTheSampledStacks() throws Exception {
+        samples.started("JDK Flight Recorder", Duration.ofMillis(10));
+        samples.add(System.currentTimeMillis(), 1, "main", true, false,
+                List.of("java.lang.Thread.run", "com.acme.Report.render"));
+
+        HttpResponse<String> profile = get("/api/profile?window=60&frames=app");
+
+        assertEquals(200, profile.statusCode());
+        assertTrue(profile.body().startsWith("{\"source\":\"JDK Flight Recorder\",\"packages\":[\"com.acme\"]"),
+                profile.body());
+        assertTrue(profile.body().contains("\"samples\":1,\"agentSamples\":0,"), profile.body());
+        assertTrue(profile.body().contains("{\"method\":\"com.acme.Report.render\",\"app\":true,\"total\":1,\"self\":1"),
+                profile.body());
+        assertEquals(400, get("/api/profile?frames=some").statusCode());
+        assertEquals(404, get("/api/profile?request=42").statusCode());
     }
 
     @Test

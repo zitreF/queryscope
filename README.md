@@ -38,14 +38,20 @@ That is the whole setup: QueryScope starts your app with the agent attached. Ope
   endpoints by time spent in the database and the latest findings. A short notice appears whenever a new problem
   shows up.
 - **Session summary.** When the app stops, QueryScope prints every endpoint and task with its calls, queries per
-  call, average time and time in the database, followed by the findings that came up most often. IDs in paths are
-  folded, so `/api/customers/7` and `/api/customers/8` count as `GET /api/customers/{id}`.
+  call, average time and time in the database, followed by the findings that came up most often and the hottest
+  methods by CPU samples, also for a program that never ran SQL. IDs in paths are folded, so `/api/customers/7` and
+  `/api/customers/8` count as `GET /api/customers/{id}`.
 - **Request details.** The SQL tab's Requests view shows each request's findings, its queries on a timeline and the
   full SQL with syntax highlighting.
 - **Call tree.** The Java tab shows a tree of your own methods for every request and task, also the ones that ran
   no SQL: calls, total and self time, and the queries each method ran, so an N+1 points at the method that loops and a
   click on it lists its SQL. A table ranks the methods by self time, and a method that spends too long in Java rather
   than in SQL is reported as slow code. Your package is taken from the main class, or set with `package=`.
+- **Sampling profiler.** The Java tab's Profiler takes a stack sample of the running threads with JDK Flight Recorder
+  every 10 ms, so it sees every method of any Java program: your code, libraries, frameworks and the JDK. A flame
+  graph shows where the CPU time goes in the whole app, one thread, one request or every call of an endpoint, with
+  your code in blue, and a table lists the hottest methods. It needs no setup and costs around one percent of CPU.
+  Where Flight Recorder is missing, as on OpenJ9, it samples thread dumps instead.
 - **Any data access code.** Works under Hibernate, Spring Data JPA, `JdbcClient`, `JdbcTemplate` or plain JDBC, with
   any driver and connection pool.
 - **Not only HTTP.** Queries that run outside a request, in scheduled jobs, message listeners or a plain `main`, are
@@ -160,6 +166,12 @@ WARN  QueryScope : Slow query: 530.5 ms select c.name as customer, count(*) as e
 
 ![QueryScope panel showing a slow query](docs/panel-slow-query.png)
 
+The Java tab's Profiler shows the same app from the CPU's side. The demo's CSV export builds its text with `+=` in a
+loop, and the flame graph of its calls points at `RevenueSheetService.dailyRevenue` and the JDK's string
+concatenation right under it:
+
+![QueryScope profiler with the flame graph of the CSV export](docs/panel-profiler.png)
+
 ## Attaching it to your own app
 
 Build the agent once with `./gradlew shadowJar`, which writes `build/libs/queryscope.jar`.
@@ -218,11 +230,13 @@ java -javaagent:/path/to/queryscope.jar=port=9090,nPlusOneThreshold=3,slowQueryM
 | `slowMethodMs`      | `100`   | Methods spending at least this long in their own code        |
 | `package`           | main's  | Package whose methods form the call tree, can be repeated    |
 | `profile`           | `true`  | Records the call tree of your methods                        |
+| `sampling`          | `true`  | Runs the sampling profiler                                   |
+| `sampleMs`          | `10`    | How often the sampling profiler takes a stack sample         |
 | `entry`             | none    | `Class#method` whose call becomes one task, can be repeated  |
 | `open`              | `false` | Opens the panel in the default browser once it is running    |
 | `summary`           | `true`  | Prints the session summary when the JVM stops                |
 
-`open`, `summary` and `profile` work without a value too, so `--open` and `open` mean `open=true`. An unknown option or an
+`open`, `summary`, `profile` and `sampling` work without a value too, so `--open` and `open` mean `open=true`. An unknown option or an
 invalid value stops the JVM at startup with a message that names it. If the port is taken, the panel is skipped and
 findings still go to the log.
 
@@ -244,12 +258,13 @@ characters, binary values shown as their size), so don't attach it in production
 
 The panel is backed by a small JSON API on the same port:
 
-| Endpoint                       | Returns                                                                                                              |
-|--------------------------------|----------------------------------------------------------------------------------------------------------------------|
-| `GET /api/requests`            | the last 200 requests that ran SQL and the last 200 that only ran your code, newest first, with queries and findings |
-| `DELETE /api/requests`         | clears them                                                                                                          |
-| `GET /api/events`              | a server-sent events stream with one `request` event per finished request                                            |
-| `GET /api/requests/{id}/calls` | the call tree of one stored request, with the queries of each method                                                 |
+| Endpoint                       | Returns                                                                                                                |
+|--------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| `GET /api/requests`            | the last 200 requests that ran SQL and the last 200 that only ran your code, newest first, with queries and findings   |
+| `DELETE /api/requests`         | clears them                                                                                                            |
+| `GET /api/events`              | a server-sent events stream with one `request` event per finished request                                              |
+| `GET /api/requests/{id}/calls` | the call tree of one stored request, with the queries of each method                                                   |
+| `GET /api/profile`             | a flame graph and the hot methods, for `window` seconds, a `thread`, `frames=app`, or a `request` and `scope=endpoint` |
 
 For example, after clicking through the demo, list the requests that have a finding:
 
@@ -318,6 +333,11 @@ ResultSet.next ─────────────────────�
   query is added to the method on top of the stack. Methods already running when a task starts are kept and marked,
   direct recursion folds into one node, and a tree stops growing at 1000 methods or 100 levels. Packages come from the
   main class, or from `Start-Class` and `Main-Class` in the manifest of the jar, and generated proxies are skipped.
+- **Sampling** starts a Flight Recorder `RecordingStream` with `jdk.ExecutionSample` and `jdk.NativeMethodSample`
+  every `sampleMs` on a background thread and keeps 15 minutes or 200,000 samples, with identical stacks stored once.
+  **Profile** merges the samples of a time range into a flame tree when the panel asks for one: a sample belongs to a
+  request when it was taken on the request's thread while the request ran. The launcher asks Flight Recorder for 256
+  frames per stack instead of 64, and on exit the stream is stopped so the last samples reach the session summary.
 - **SqlNormalizer** turns number and string literals into `?`, collapses `IN (1, 2, 3)` to `IN (?)`, and drops
   comments, case and extra whitespace, so queries that differ only in their values group together.
 - **QueryAnalyzer** reports a SELECT that runs at least `nPlusOneThreshold` times in one request as N+1, naming the
@@ -353,11 +373,16 @@ brings, and the agent is compiled for Java 17.
   loop calling tiny methods millions of times gets noticeably slower; `profile=false` turns it off.
 - Lambdas, constructors and default methods of interfaces are not nodes of their own: what they call shows up under
   the method that runs them.
+- Flight Recorder samples only threads running Java code, a few of them per tick, and skips threads inside some JVM
+  stubs such as array copies, so a short request gets only a handful of samples: look at all calls of its endpoint
+  instead. Threads that sleep or wait on a lock are not sampled.
+- With `-javaagent`, Flight Recorder keeps 64 frames per stack unless the JVM gets
+  `-XX:FlightRecorderOptions=stackdepth=256`. Deeper stacks show up under `(truncated stack)` in the full view.
 
 ## Project layout
 
 ```
-src/main/java/me/fertiz/queryscope/agent/    the agent: instrument, trace, analysis, report and panel
+src/main/java/me/fertiz/queryscope/agent/    the agent: instrument, trace, analysis, profile, report and panel
 src/main/resources/.../agent/panel/          the web panel (HTML, CSS and JavaScript)
 src/test/java/me/fertiz/queryscope/agent/    unit tests
 src/test/java/me/fertiz/queryscope/demo/     demo shop on Spring Boot, JPA and H2 with an N+1, its fix and a slow report
@@ -374,8 +399,8 @@ src/test/java/me/fertiz/queryscope/e2e/      runs the demo, the launcher and the
 Java 25 toolchain, Gradle 9 with Kotlin DSL (wrapper included), Shadow for the agent jar. `build` runs every test:
 
 - Unit tests for the normalizer, the analyzer, the options, the launcher's command line, the parameter formatting, the
-  session summary, the call stack, the package detection, the JSON writer, the report store and the panel server,
-  including SSE and the `Host` check.
+  session summary, the call stack, the package detection, the sample store, the flame tree, the JSON writer, the
+  report store and the panel server, including SSE and the `Host` check, and both samplers on a busy thread.
 - `AgentInstrumentationTest` installs the agent into the test JVM with ByteBuddyAgent and runs real queries through
   HikariCP and H2 inside simulated `jakarta.servlet` and `javax.servlet` requests, outside any request, and inside an
   `entry=` method, and checks the call tree of a profiled fixture class, with recursion and exceptions.
@@ -383,8 +408,8 @@ Java 25 toolchain, Gradle 9 with Kotlin DSL (wrapper included), Shadow for the a
 - `QueryScopeEndToEndTest` starts the demo shop with `-javaagent:queryscope.jar` as a separate process on free ports
   and checks through the panel API that the naive endpoint is an N+1 at `CustomerSummary.of`, the optimized one runs a
   single query with no findings, the report is flagged as slow, duplicates, unbatched writes and large results are
-  found, the call tree leads from the controller down to `CustomerSummary.of`, the CSV export is slow code, and new
-  requests arrive over SSE. The demo runs on the test classpath without the agent's own classes, so
+  found, the call tree leads from the controller down to `CustomerSummary.of`, the CSV export is slow code and shows up
+  in the Flight Recorder samples of its endpoint, and new requests arrive over SSE. The demo runs on the test classpath without the agent's own classes, so
   only the shaded `queryscope.jar` is attached.
 - `LauncherEndToEndTest` starts the demo through `java -jar queryscope.jar` and checks that killing the launcher takes
   the app down with it.

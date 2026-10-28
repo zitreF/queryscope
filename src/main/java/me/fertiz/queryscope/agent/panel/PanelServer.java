@@ -4,6 +4,9 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import me.fertiz.queryscope.agent.data.RequestReport;
+import me.fertiz.queryscope.agent.profile.Profile;
+import me.fertiz.queryscope.agent.profile.SampleStore;
+import me.fertiz.queryscope.agent.trace.AppPackages;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -42,20 +45,27 @@ public final class PanelServer {
     private final ExecutorService executor;
     private final ReportStore store;
     private final List<String> profiledPackages;
+    private final AppPackages application;
+    private final SampleStore samples;
 
-    private PanelServer(HttpServer server, ExecutorService executor, ReportStore store, List<String> profiledPackages) {
+    private PanelServer(HttpServer server, ExecutorService executor, ReportStore store, List<String> profiledPackages,
+                        AppPackages application, SampleStore samples) {
         this.server = server;
         this.executor = executor;
         this.store = store;
         this.profiledPackages = List.copyOf(profiledPackages);
+        this.application = application;
+        this.samples = samples;
     }
 
-    public static PanelServer start(int port, ReportStore store, List<String> profiledPackages) throws IOException {
+    public static PanelServer start(int port, ReportStore store, List<String> profiledPackages,
+                                    AppPackages application, SampleStore samples) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0);
         ExecutorService executor = Executors.newCachedThreadPool(daemonThreads());
-        PanelServer panel = new PanelServer(server, executor, store, profiledPackages);
+        PanelServer panel = new PanelServer(server, executor, store, profiledPackages, application, samples);
         server.createContext("/", localOnly(panel::serveAsset));
         server.createContext("/api/requests", localOnly(panel::serveRequests));
+        server.createContext("/api/profile", localOnly(panel::serveProfile));
         server.createContext("/api/events", localOnly(panel::streamEvents));
         server.setExecutor(executor);
         Thread starter = new Thread(server::start, "queryscope-panel-start");
@@ -116,6 +126,26 @@ public final class PanelServer {
         } else {
             respond(exchange, 200, JSON, utf8(ReportJson.ofCalls(report.get(), profiledPackages)));
         }
+    }
+
+    private void serveProfile(HttpExchange exchange) throws IOException {
+        if (!exchange.getRequestMethod().equals("GET")) {
+            respond(exchange, 405, null, new byte[0]);
+            return;
+        }
+        Optional<Profile.Filter> filter;
+        try {
+            filter = ProfileQuery.parse(exchange.getRequestURI().getRawQuery(), store, samples);
+        } catch (IllegalArgumentException e) {
+            respond(exchange, 400, "text/plain; charset=utf-8", utf8(e.getMessage()));
+            return;
+        }
+        if (filter.isEmpty()) {
+            respond(exchange, 404, null, new byte[0]);
+            return;
+        }
+        Profile profile = Profile.build(samples, application, filter.get());
+        respond(exchange, 200, JSON, utf8(ProfileJson.of(profile, samples, filter.get(), application.names())));
     }
 
     private void streamEvents(HttpExchange exchange) throws IOException {

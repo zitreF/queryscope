@@ -34,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class QueryScopeEndToEndTest {
 
     private static final Duration REPORT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration SAMPLES_TIMEOUT = Duration.ofSeconds(20);
     private static final List<String> ENDPOINTS =
             List.of("/api/customers/naive", "/api/customers/optimized", "/api/reports/customer-activity");
 
@@ -93,6 +94,25 @@ class QueryScopeEndToEndTest {
         assertEquals(40, summary.path("calls").asInt());
         assertEquals(40, summary.path("queryIndexes").size());
         assertTrue(controller.path("totalMs").asDouble() >= summary.path("totalMs").asDouble(), controller.toString());
+    }
+
+    @Test
+    void samplesTheJavaCodeBehindASlowEndpointWithFlightRecorder() throws Exception {
+        for (int call = 0; call < 3; call++) {
+            assertEquals(200, get(appPort, "/api/reports/daily-revenue").statusCode());
+        }
+        long id = reportFor(panelPort, "/api/reports/daily-revenue").path("id").asLong();
+        String method = RevenueSheetService.class.getName() + ".dailyRevenue";
+
+        Instant deadline = Instant.now().plus(SAMPLES_TIMEOUT);
+        JsonNode profile = JSON.readTree(get(panelPort, "/api/profile?request=" + id + "&scope=endpoint&frames=app").body());
+        while (!containsMethod(profile.path("root"), method) && Instant.now().isBefore(deadline)) {
+            Thread.sleep(500);
+            profile = JSON.readTree(get(panelPort, "/api/profile?request=" + id + "&scope=endpoint&frames=app").body());
+        }
+
+        assertEquals("JDK Flight Recorder", profile.path("source").asString());
+        assertTrue(containsMethod(profile.path("root"), method), profile.toString());
     }
 
     @Test
@@ -237,6 +257,19 @@ class QueryScopeEndToEndTest {
             }
         }
         throw new AssertionError("No " + type + " finding in " + findings);
+    }
+
+    private static boolean containsMethod(JsonNode node, String method) {
+        if (node.path("method").asString().equals(method)) {
+            return true;
+        }
+        JsonNode children = node.path("children");
+        for (int index = 0; index < children.size(); index++) {
+            if (containsMethod(children.get(index), method)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static JsonNode method(JsonNode nodes, String name) {

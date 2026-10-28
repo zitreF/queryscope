@@ -6,6 +6,9 @@ import me.fertiz.queryscope.agent.data.QueryExecution;
 import me.fertiz.queryscope.agent.data.RequestReport;
 import me.fertiz.queryscope.agent.data.RequestTrace;
 import me.fertiz.queryscope.agent.data.UnitKind;
+import me.fertiz.queryscope.agent.profile.Profile;
+import me.fertiz.queryscope.agent.profile.SampleStore;
+import me.fertiz.queryscope.agent.trace.AppPackages;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -31,6 +34,7 @@ class SessionSummaryTest {
 
     private final TestClock clock = new TestClock();
     private final SessionSummary summary = new SessionSummary(clock);
+    private final SampleStore samples = new SampleStore(clock, 100, Duration.ofHours(1));
 
     @Test
     void printsNothingWhenNoQueryRan() {
@@ -67,9 +71,27 @@ class SessionSummaryTest {
         assertTrue(output.matches("(?s).*GET /api/customers/\\{id}/orders +3 +6\\.0 .* N\\+1\\R.*"), output);
     }
 
+    @Test
+    void listsTheHottestMethodsEvenWhenNoQueryRan() {
+        List<String> render = List.of("java.lang.Thread.run", "com.acme.Report.render", "java.lang.StringBuilder.append");
+        for (int index = 0; index < 3; index++) {
+            samples.add(STARTED_AT.toEpochMilli(), 1, "main", true, false, render);
+        }
+        samples.add(STARTED_AT.toEpochMilli(), 1, "main", true, false, List.of("java.lang.Thread.run", "com.acme.Report.load"));
+
+        String output = print();
+
+        assertTrue(output.contains("QueryScope session summary: 0 s, 0 requests and tasks, 0 queries, 4 CPU samples"), output);
+        assertTrue(output.contains(" 75.0%  75.0%  java.lang.StringBuilder.append"), output);
+        assertTrue(output.contains(" 25.0%  25.0%  com.acme.Report.load  (your code)"), output);
+        assertTrue(output.contains("Your methods by CPU time in them and in the library code they call"), output);
+        assertTrue(output.contains(" 75.0%  com.acme.Report.render"), output);
+    }
+
     private String print() {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        summary.print(new PrintStream(bytes, true, StandardCharsets.UTF_8));
+        Profile profile = Profile.build(samples, AppPackages.of(List.of("com.acme")), Profile.Filter.everything());
+        summary.print(new PrintStream(bytes, true, StandardCharsets.UTF_8), profile);
         return bytes.toString(StandardCharsets.UTF_8);
     }
 

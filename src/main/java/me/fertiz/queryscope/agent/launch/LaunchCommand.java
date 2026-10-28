@@ -12,6 +12,8 @@ public record LaunchCommand(List<String> agentOptions, List<String> target, List
     private static final Set<String> CLASSPATH_FLAGS = Set.of("-cp", "-classpath", "--class-path");
     private static final List<String> FOREIGN_AGENT_OPTIONS =
             List.of("-agentlib", "-agentpath", "-javaagent", "-Xrunjdwp", "-Xdebug");
+    private static final String JFR_OPTIONS = "-XX:FlightRecorderOptions";
+    private static final int JFR_STACK_DEPTH = 256;
 
     public LaunchCommand {
         agentOptions = List.copyOf(agentOptions);
@@ -48,6 +50,15 @@ public record LaunchCommand(List<String> agentOptions, List<String> target, List
             index++;
         }
         return new LaunchCommand(agentOptions, target, List.of(arguments).subList(index, arguments.length));
+    }
+
+    public static List<String> withDeepJfrStacks(List<String> jvmOptions, String vmName) {
+        if (vmName.contains("OpenJ9") || jvmOptions.stream().anyMatch(option -> option.startsWith(JFR_OPTIONS))) {
+            return jvmOptions;
+        }
+        List<String> options = new ArrayList<>(jvmOptions);
+        options.add(JFR_OPTIONS + "=stackdepth=" + JFR_STACK_DEPTH);
+        return options;
     }
 
     public String agentOptionString() {

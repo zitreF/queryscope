@@ -27,7 +27,25 @@ const FINDING_TYPES = {
     tooManyQueries: {area: 'sql', css: 'too-many', name: 'Queries', label: finding => `${finding.queries} queries`},
     slowMethod: {area: 'java', css: 'slow-method', name: 'Code', label: finding => `Slow code ${formatMs(finding.ownMs)}`},
 };
-const VIEWS = {'sql/live': 'view-live', 'sql/requests': 'view-requests', 'java/calls': 'view-calls'};
+const VIEWS = {
+    'sql/live': 'view-live',
+    'sql/requests': 'view-requests',
+    'java/profile': 'view-profile',
+    'java/calls': 'view-calls',
+};
+const PROFILE_WINDOWS = [
+    {label: '1 min', value: 60},
+    {label: '5 min', value: 300},
+    {label: '15 min', value: 900},
+];
+const PROFILE_REFRESH_MS = 5000;
+const FLAME_ROW = 22;
+const FLAME_MAX_NODES = 8000;
+const FLAME_MIN_PX = 3;
+const FLAME_LABEL_PX = 40;
+const SPECIAL_FRAMES = new Set(['all', '(outside your code)', '(truncated stack)']);
+const JDK_PREFIXES = ['java.', 'javax.', 'jdk.', 'sun.', 'com.sun.'];
+const HOT_ROWS = 30;
 const LEGACY_VIEWS = {live: 'sql/live', requests: 'sql/requests'};
 const HOT_METHODS = 15;
 const QUERY_ROLE_PRIORITY = ['n-plus-one', 'slow', 'repeated-write', 'duplicate', 'large-result'];
@@ -51,7 +69,22 @@ const state = {
     paused: false,
     pausedAt: 0,
     view: 'sql/live',
-    lastViews: {sql: 'sql/live', java: 'java/calls'},
+    lastViews: {sql: 'sql/live', java: 'java/profile'},
+    profile: {
+        seconds: 300,
+        thread: 'all',
+        frames: 'app',
+        framesChosen: false,
+        samples: 'cpu',
+        hotMode: 'all',
+        scope: null,
+        focus: [],
+        search: '',
+        data: null,
+        layout: [],
+        loading: false,
+        loadedAt: 0,
+    },
     windowMs: WINDOWS[0].ms,
     renderedId: undefined,
     laneEnds: [],
@@ -100,6 +133,27 @@ $('only-slow-code').addEventListener('change', event => {
     state.onlySlowCode = event.target.checked;
     render();
 });
+$('profile-search').addEventListener('input', event => {
+    state.profile.search = event.target.value.trim();
+    renderFlame();
+});
+$('profile-thread').addEventListener('change', event => {
+    state.profile.thread = event.target.value;
+    state.profile.focus = [];
+    loadProfile();
+});
+$('profile-reset').addEventListener('click', () => {
+    state.profile.focus = [];
+    renderFlame();
+});
+$('flame').addEventListener('mousemove', hoverFlame);
+$('flame').addEventListener('mouseleave', () => $('flame-tooltip').hidden = true);
+$('flame').addEventListener('click', zoomFlame);
+window.addEventListener('resize', () => {
+    if (state.view === 'java/profile') {
+        renderFlame();
+    }
+});
 streamCanvas.addEventListener('mousemove', event => hover(event));
 streamCanvas.addEventListener('mouseleave', () => {
     state.hoverId = null;
@@ -112,6 +166,7 @@ streamCanvas.addEventListener('click', () => {
 });
 
 renderWindowButtons();
+renderProfileControls();
 selectView(viewFromHash());
 render();
 connect();
@@ -273,6 +328,9 @@ function selectView(view) {
     if (location.hash !== `#${view}`) {
         history.replaceState(null, '', `#${view}`);
     }
+    if (view === 'java/profile') {
+        loadProfile();
+    }
 }
 
 function openRequest(id) {
@@ -287,6 +345,19 @@ function openCalls(id) {
     state.callFollow = false;
     selectView('java/calls');
     render();
+}
+
+function openProfile(report) {
+    state.profile.scope = {
+        id: report.id,
+        kind: 'request',
+        label: `${report.method} ${report.path}`,
+        endpoint: isTask(report) ? `Task ${report.path}` : `${report.method} ${report.view.endpointPath}`,
+    };
+    state.profile.focus = [];
+    state.profile.data = null;
+    renderProfileControls();
+    selectView('java/profile');
 }
 
 function openFinding(report, finding) {
@@ -310,6 +381,10 @@ function render() {
 
 function tick() {
     renderStats();
+    if (state.view === 'java/profile' && !state.paused && state.profile.scope === null
+        && Date.now() - state.profile.loadedAt >= PROFILE_REFRESH_MS) {
+        loadProfile();
+    }
     const current = now();
     for (const {node, end} of state.feedTimes) {
         node.textContent = ago(current - end);
@@ -419,6 +494,347 @@ function renderWindowButtons() {
             renderWindowButtons();
         },
     }, option.label)));
+}
+
+function renderProfileControls() {
+    const profile = state.profile;
+    segmented($('profile-window'), PROFILE_WINDOWS, profile.seconds, value => {
+        profile.seconds = value;
+        loadProfile();
+    });
+    segmented($('profile-frames'), [{label: 'All frames', value: 'all'}, {label: 'Your code', value: 'app'}],
+        profile.frames, value => {
+            profile.frames = value;
+            profile.framesChosen = true;
+            profile.focus = [];
+            loadProfile();
+        });
+    segmented($('profile-samples'), [{label: 'CPU', value: 'cpu'}, {label: 'CPU and native', value: 'all'}],
+        profile.samples, value => {
+            profile.samples = value;
+            profile.focus = [];
+            loadProfile();
+        });
+    segmented($('hot-mode'), [{label: 'All methods', value: 'all'}, {label: 'Your methods', value: 'app'}],
+        profile.hotMode, value => {
+            profile.hotMode = value;
+            renderHotList();
+        });
+    $('profile-window').hidden = profile.scope !== null;
+}
+
+function segmented(container, options, current, onSelect) {
+    container.replaceChildren(...options.map(option => el('button', {
+        type: 'button',
+        class: 'segment',
+        'aria-pressed': String(option.value === current),
+        onclick: () => {
+            onSelect(option.value);
+            renderProfileControls();
+            renderProfileScope();
+        },
+    }, option.label)));
+}
+
+async function loadProfile() {
+    const profile = state.profile;
+    if (profile.loading) {
+        return;
+    }
+    profile.loading = true;
+    const parameters = new URLSearchParams({thread: profile.thread, frames: profile.frames, samples: profile.samples});
+    if (profile.scope) {
+        parameters.set('request', String(profile.scope.id));
+        parameters.set('scope', profile.scope.kind);
+    } else {
+        parameters.set('window', String(profile.seconds));
+    }
+    try {
+        const response = await fetch(`api/profile?${parameters}`);
+        profile.data = response.ok ? linkParents(await response.json()) : {missing: true};
+    } catch (error) {
+        profile.data = {failed: true};
+    } finally {
+        profile.loading = false;
+        profile.loadedAt = Date.now();
+    }
+    if (profile.frames === 'app' && !profile.framesChosen && profile.data.packages && profile.data.packages.length === 0) {
+        profile.frames = 'all';
+        renderProfileControls();
+        loadProfile();
+        return;
+    }
+    renderProfile();
+}
+
+function linkParents(data) {
+    const link = (node, parent) => {
+        node.parent = parent;
+        node.children.forEach(child => link(child, node));
+    };
+    if (data.root) {
+        link(data.root, null);
+    }
+    return data;
+}
+
+function renderProfile() {
+    renderProfileScope();
+    renderThreadOptions();
+    $('profile-status').textContent = profileStatus(state.profile.data);
+    renderFlame();
+    renderHotList();
+}
+
+function profileStatus(data) {
+    if (!data) {
+        return 'Loading samples…';
+    }
+    if (data.missing) {
+        return 'The agent no longer keeps this request.';
+    }
+    if (data.failed) {
+        return 'Could not load samples from the agent.';
+    }
+    if (!data.source) {
+        return 'Sampling is off or still starting. It runs unless the agent is started with sampling=false.';
+    }
+    const range = PROFILE_WINDOWS.find(option => option.value === state.profile.seconds);
+    return `${plural(data.samples, 'sample', 'samples')} from ${data.source}, one every ${data.intervalMs} ms`
+        + (state.profile.scope ? '' : `, in the last ${range ? range.label : `${state.profile.seconds} s`}`)
+        + (data.agentSamples > 0 ? `. QueryScope itself took ${formatCount(data.agentSamples)} more.` : '');
+}
+
+function renderThreadOptions() {
+    const data = state.profile.data;
+    const threads = data && data.threads ? data.threads : [];
+    const options = [el('option', {value: 'all'}, 'All threads')];
+    for (const thread of threads) {
+        options.push(el('option', {value: String(thread.id)}, `${thread.name} · ${formatCount(thread.samples)}`));
+    }
+    if (state.profile.thread !== 'all' && !threads.some(thread => String(thread.id) === state.profile.thread)) {
+        options.push(el('option', {value: state.profile.thread}, `thread ${state.profile.thread} · 0`));
+    }
+    $('profile-thread').replaceChildren(...options);
+    $('profile-thread').value = state.profile.thread;
+}
+
+function renderProfileScope() {
+    const scope = state.profile.scope;
+    const box = $('profile-scope');
+    box.hidden = scope === null;
+    if (!scope) {
+        return;
+    }
+    const choice = el('div', {class: 'segmented', role: 'group', 'aria-label': 'Scope'});
+    box.replaceChildren(
+        el('span', {class: 'scope-label'}, scope.kind === 'request'
+            ? `Samples of one call of ${scope.label}`
+            : `Samples of every stored call of ${scope.endpoint}`),
+        choice,
+        el('button', {
+            type: 'button',
+            class: 'text-button',
+            onclick: () => {
+                state.profile.scope = null;
+                state.profile.focus = [];
+                renderProfileControls();
+                loadProfile();
+            },
+        }, 'Whole app'));
+    segmented(choice, [{label: 'This call', value: 'request'}, {label: 'All calls', value: 'endpoint'}], scope.kind,
+        value => {
+            scope.kind = value;
+            state.profile.focus = [];
+            loadProfile();
+        });
+}
+
+function renderFlame() {
+    const container = $('flame');
+    const data = state.profile.data;
+    if (!data || !data.root || data.samples === 0) {
+        container.style.height = '';
+        container.replaceChildren(el('p', {class: 'empty'}, emptyFlameText(data)));
+        $('profile-reset').hidden = true;
+        $('profile-zoom').textContent = '';
+        return;
+    }
+    const width = container.clientWidth || 1000;
+    const focus = findFocus(data.root, state.profile.focus);
+    const chain = [];
+    for (let node = focus.parent; node !== null; node = node.parent) {
+        chain.unshift(node);
+    }
+    const layout = chain.map((node, depth) => ({node, x: 0, width: 1, depth, ancestor: true}));
+    layoutFlame(focus, 0, 1, chain.length, width, layout);
+    state.profile.layout = layout;
+    const search = state.profile.search.toLowerCase();
+    const rows = Math.max(...layout.map(item => item.depth)) + 1;
+    container.style.height = `${rows * FLAME_ROW}px`;
+    container.replaceChildren(...layout.map((item, index) => {
+        const matches = search !== '' && item.node.method.toLowerCase().includes(search);
+        return el('div', {
+            class: ['flame-node', frameKind(item.node), item.ancestor ? 'ancestor' : '', matches ? 'match' : '',
+                search !== '' && !matches ? 'faded' : ''].join(' '),
+            'data-index': String(index),
+            style: {left: percent(item.x), width: percent(item.width), top: `${item.depth * FLAME_ROW}px`},
+        }, item.width * width >= FLAME_LABEL_PX ? frameLabel(item.node) : null);
+    }));
+    $('profile-reset').hidden = state.profile.focus.length === 0;
+    $('profile-zoom').textContent = focus === data.root ? '' : `Zoomed into ${frameLabel(focus)}`;
+}
+
+function layoutFlame(node, x, width, depth, pixels, layout) {
+    if (layout.length >= FLAME_MAX_NODES) {
+        return;
+    }
+    layout.push({node, x, width, depth, ancestor: false});
+    let offset = x;
+    for (const child of node.children) {
+        const childWidth = width * child.total / node.total;
+        if (childWidth * pixels >= FLAME_MIN_PX) {
+            layoutFlame(child, offset, childWidth, depth + 1, pixels, layout);
+        }
+        offset += childWidth;
+    }
+}
+
+function emptyFlameText(data) {
+    if (!data) {
+        return 'Loading samples…';
+    }
+    if (data.missing || data.failed || !data.source) {
+        return profileStatus(data);
+    }
+    if (state.profile.scope && state.profile.scope.kind === 'request') {
+        return `This call ran too briefly to be sampled, one sample is taken every ${data.intervalMs} ms. `
+            + 'Choose all calls to see every stored call of this endpoint together.';
+    }
+    return 'No samples yet. Use the app, or choose a longer time window.';
+}
+
+function findFocus(root, path) {
+    let node = root;
+    for (const method of path) {
+        const child = node.children.find(candidate => candidate.method === method);
+        if (!child) {
+            break;
+        }
+        node = child;
+    }
+    return node;
+}
+
+function pathOf(node) {
+    const path = [];
+    for (let current = node; current.parent !== null; current = current.parent) {
+        path.unshift(current.method);
+    }
+    return path;
+}
+
+function zoomFlame(event) {
+    const target = event.target.closest('.flame-node');
+    if (!target) {
+        return;
+    }
+    state.profile.focus = pathOf(state.profile.layout[Number(target.dataset.index)].node);
+    $('flame-tooltip').hidden = true;
+    renderFlame();
+}
+
+function hoverFlame(event) {
+    const tooltip = $('flame-tooltip');
+    const target = event.target.closest('.flame-node');
+    if (!target) {
+        tooltip.hidden = true;
+        return;
+    }
+    const node = state.profile.layout[Number(target.dataset.index)].node;
+    const samples = Math.max(state.profile.data.samples, 1);
+    const kind = {app: 'Your code', lib: 'Library or framework', jdk: 'JDK', special: ''}[frameKind(node)];
+    tooltip.replaceChildren(...[
+        el('div', {class: 'tooltip-path'}, node.method),
+        el('div', {class: 'tooltip-meta'}, [
+            `${formatCount(node.total)} ${node.total === 1 ? 'sample' : 'samples'}, ${wholePercent(node.total / samples)}`,
+            node.self > 0 ? `${formatCount(node.self)} on its own line` : null,
+            kind || null,
+        ].filter(Boolean).join(' · ')),
+        el('div', {class: 'tooltip-meta'}, 'Click to zoom in'),
+    ]);
+    tooltip.hidden = false;
+    const bounds = $('flame').getBoundingClientRect();
+    const mouseX = event.clientX - bounds.left;
+    const mouseY = event.clientY - bounds.top;
+    tooltip.style.left = `${Math.max(0, Math.min(mouseX + 14, bounds.width - tooltip.offsetWidth))}px`;
+    tooltip.style.top = `${mouseY + 18}px`;
+}
+
+function frameKind(node) {
+    if (SPECIAL_FRAMES.has(node.method)) {
+        return 'special';
+    }
+    if (node.app) {
+        return 'app';
+    }
+    return JDK_PREFIXES.some(prefix => node.method.startsWith(prefix)) ? 'jdk' : 'lib';
+}
+
+function frameLabel(node) {
+    return SPECIAL_FRAMES.has(node.method) ? node.method : shortMethod(node.method);
+}
+
+function renderHotList() {
+    const data = state.profile.data;
+    const yours = state.profile.hotMode === 'app';
+    $('hot-hint').textContent = yours
+        ? 'Your methods by the samples taken in them or in library code they call'
+        : 'Methods by the samples taken while they were running their own code';
+    if (!data || !data.hot || data.samples === 0) {
+        $('hot-list').replaceChildren(el('p', {class: 'empty'}, 'No samples yet.'));
+        return;
+    }
+    const methods = yours
+        ? data.hot.filter(method => method.own > 0).sort((a, b) => b.own - a.own)
+        : [...data.hot].filter(method => method.self > 0).sort((a, b) => b.self - a.self);
+    if (methods.length === 0) {
+        $('hot-list').replaceChildren(el('p', {class: 'empty'}, yours
+            ? 'None of your methods were on the CPU in these samples, or QueryScope does not know your package yet.'
+            : 'No samples yet.'));
+        return;
+    }
+    const samples = data.samples;
+    const hot = table(
+        [
+            {title: 'Method', width: 'auto'},
+            {title: yours ? 'In it and its libraries' : 'Self', width: '170px', number: true},
+            {title: 'Total', width: '90px', number: true},
+            {title: 'Share of samples', width: '22%'},
+        ],
+        methods.slice(0, HOT_ROWS).map(method => {
+            const count = yours ? method.own : method.self;
+            return el('tr', {
+                    class: 'clickable',
+                    onclick: () => {
+                        state.profile.search = method.method;
+                        $('profile-search').value = method.method;
+                        renderFlame();
+                        $('flame').scrollIntoView({block: 'center', behavior: 'smooth'});
+                    },
+                },
+                el('td', {}, el('div', {class: 'call-name'},
+                    el('code', {title: method.method}, method.app ? shortMethod(method.method) : method.method),
+                    method.app ? el('span', {class: 'label your-code'}, 'Your code') : null)),
+                el('td', {class: 'number'}, `${(count * 100 / samples).toFixed(1)}%`),
+                el('td', {class: 'number'}, `${(method.total * 100 / samples).toFixed(1)}%`),
+                el('td', {},
+                    el('div', {class: 'call-share'},
+                        el('div', {class: 'call-share-total', style: {width: percent(method.total / samples)}}),
+                        el('div', {class: 'call-share-self', style: {width: percent(count / samples)}}))));
+        }));
+    hot.classList.add('call-table');
+    $('hot-list').replaceChildren(hot);
 }
 
 function laneCount() {
@@ -755,10 +1171,13 @@ function renderCallDetails(report) {
         el('div', {class: 'panel details-header'},
             el('div', {class: 'details-title'},
                 el('h1', {}, el('span', {class: 'method'}, report.method), report.path),
-                report.view.hasSql
-                    ? el('button', {type: 'button', class: 'text-button', onclick: () => openRequest(report.id)},
-                        'SQL queries')
-                    : null),
+                el('div', {class: 'details-actions'},
+                    el('button', {type: 'button', class: 'text-button', onclick: () => openProfile(report)},
+                        'CPU samples'),
+                    report.view.hasSql
+                        ? el('button', {type: 'button', class: 'text-button', onclick: () => openRequest(report.id)},
+                            'SQL queries')
+                        : null)),
             el('dl', {class: 'facts', id: 'call-facts'}, callFacts(report, null))),
         el('h3', {class: 'section-title'}, 'Findings'),
         ...findingCards(report.view.javaFindings, 'No slow code in this request.'),

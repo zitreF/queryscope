@@ -24,7 +24,7 @@ class AgentConfigTest {
                 "port=9090, nPlusOneThreshold=3,slowQueryMs=250,largeResultRows=1000,maxQueries=50");
 
         assertEquals(new AgentConfig(9090, 3, Duration.ofMillis(250), 1000, 50,
-                Duration.ofMillis(100), List.of(), List.of(), true, false, true), config);
+                Duration.ofMillis(100), List.of(), List.of(), true, true, Duration.ofMillis(10), false, true), config);
     }
 
     @Test
@@ -46,6 +46,14 @@ class AgentConfigTest {
         assertFalse(AgentConfig.parse("profile=false").profile());
         assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("package=com..acme"));
         assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("package=com.acme.*"));
+    }
+
+    @Test
+    void readsTheSamplingOptions() {
+        assertEquals(Duration.ofMillis(20), AgentConfig.parse("sampleMs=20").sampleInterval());
+        assertTrue(AgentConfig.DEFAULTS.sampling());
+        assertFalse(AgentConfig.parse("sampling=false").sampling());
+        assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("sampleMs=5000"));
     }
 
     @Test

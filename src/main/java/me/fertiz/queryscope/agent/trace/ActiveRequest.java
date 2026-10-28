@@ -23,6 +23,7 @@ final class ActiveRequest {
     private final Instant startedAt = Instant.now();
     private final long startedNanos = System.nanoTime();
     private final long classesAtStart = CLASSES.getTotalLoadedClassCount();
+    private final long threadId = Thread.currentThread().getId();
     private final List<QueryRecord> queries = new ArrayList<>();
     private final CallTreeBuilder calls = CallTracer.unitStarted(startedNanos);
     private int queryDepth;
@@ -89,6 +90,6 @@ final class ActiveRequest {
         return new RequestTrace(
                 id, kind, method, path, status, startedAt, endNanos - startedNanos,
                 queries.stream().map(QueryRecord::toExecution).toList(), callTree,
-                CLASSES.getTotalLoadedClassCount() - classesAtStart);
+                CLASSES.getTotalLoadedClassCount() - classesAtStart, threadId);
     }
 }

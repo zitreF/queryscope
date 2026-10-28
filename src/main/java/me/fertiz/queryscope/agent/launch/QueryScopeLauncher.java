@@ -3,6 +3,7 @@ package me.fertiz.queryscope.agent.launch;
 import me.fertiz.queryscope.agent.AgentConfig;
 
 import java.lang.management.ManagementFactory;
+import java.lang.management.RuntimeMXBean;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.util.List;
@@ -30,6 +31,8 @@ public final class QueryScopeLauncher {
               --package=com.acme          package whose methods go into the call tree, can be repeated,
                                           by default the package of the application's main class
               --profile=false             turns the call tree off
+              --sampleMs=10               how often the sampling profiler takes a stack sample
+              --sampling=false            turns the sampling profiler off
               --entry=com.acme.Job#run    method whose call becomes one task, can be repeated
 
             JVM options of this java command, such as -Xmx1g or -Dspring.profiles.active=local, are
@@ -90,6 +93,7 @@ public final class QueryScopeLauncher {
     }
 
     private static List<String> jvmOptions() {
-        return ManagementFactory.getRuntimeMXBean().getInputArguments();
+        RuntimeMXBean runtime = ManagementFactory.getRuntimeMXBean();
+        return LaunchCommand.withDeepJfrStacks(runtime.getInputArguments(), runtime.getVmName());
     }
 }

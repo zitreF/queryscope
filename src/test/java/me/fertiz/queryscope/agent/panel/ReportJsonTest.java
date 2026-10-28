@@ -83,7 +83,7 @@ class ReportJsonTest {
         CallNode toDto = new CallNode("com.acme.Mapper.toDto", 2, 600_000, 600_000, false, List.of(0, 1), List.of());
         CallNode list = new CallNode("com.acme.Service.list", 1, 1_000_000, 400_000, true, List.of(), List.of(toDto));
         RequestTrace trace = new RequestTrace(4, UnitKind.HTTP, "GET", "/orders", 200, Reports.STARTED_AT, 2_000_000,
-                List.of(), new CallTree(List.of(list), List.of(2), false), 3);
+                List.of(), new CallTree(List.of(list), List.of(2), false), 3, 1);
 
         String json = ReportJson.ofCalls(new RequestReport(trace, List.of()), List.of("com.acme"));
 

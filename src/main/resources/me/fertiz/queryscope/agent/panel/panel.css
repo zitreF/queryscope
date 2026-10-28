@@ -661,6 +661,168 @@ td.ellipsis {
     flex: none;
 }
 
+.details-actions {
+    display: flex;
+    flex: none;
+    gap: 4px;
+}
+
+.profile-controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+}
+
+.select, .search {
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text-2);
+    font: inherit;
+    font-size: 13px;
+}
+
+.select {
+    max-width: 260px;
+}
+
+.search {
+    width: 320px;
+}
+
+.search:focus, .select:focus {
+    outline: none;
+    border-color: var(--blue);
+}
+
+.profile-scope {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin: 0 20px 12px;
+    padding: 6px 8px 6px 14px;
+    border-radius: 8px;
+    background: var(--blue-bg);
+    font-size: 13px;
+}
+
+.scope-label {
+    color: var(--text);
+}
+
+.profile-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 20px 12px;
+}
+
+.profile-zoom {
+    color: var(--text-2);
+    font-family: var(--mono);
+    font-size: 12px;
+}
+
+.flame-wrap {
+    position: relative;
+    padding: 0 20px 12px;
+}
+
+.flame {
+    position: relative;
+    min-height: 60px;
+    overflow: hidden;
+}
+
+.flame .empty {
+    padding: 20px 0;
+}
+
+.flame-node {
+    position: absolute;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 2px;
+    box-shadow: inset -1px 0 var(--surface);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 20px;
+    cursor: pointer;
+}
+
+.flame-node.app {
+    background: var(--blue);
+    color: #202124;
+}
+
+.flame-node.lib {
+    background: #5f6368;
+    color: var(--text);
+}
+
+.flame-node.jdk {
+    background: #3c4043;
+    color: var(--text-2);
+}
+
+.flame-node.special {
+    background: var(--surface-hover);
+    color: var(--muted);
+}
+
+.flame-node.ancestor {
+    opacity: 0.6;
+}
+
+.flame-node:hover {
+    filter: brightness(1.15);
+}
+
+.flame-node.faded {
+    opacity: 0.22;
+}
+
+.flame-node.match {
+    box-shadow: inset 0 0 0 2px var(--yellow);
+}
+
+.flame-tooltip {
+    position: absolute;
+    z-index: 2;
+    max-width: 520px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    background: #3c4043;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+    font-size: 13px;
+}
+
+.flame-legend .app::before {
+    background: var(--blue);
+}
+
+.flame-legend .lib::before {
+    background: #5f6368;
+}
+
+.flame-legend .jdk::before {
+    background: #3c4043;
+}
+
+.label.your-code {
+    color: var(--blue);
+    background: var(--blue-bg);
+}
+
 .details-header h1 {
     margin: 0;
     font-family: var(--mono);

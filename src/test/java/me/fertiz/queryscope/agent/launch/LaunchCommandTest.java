@@ -32,6 +32,17 @@ class LaunchCommandTest {
     }
 
     @Test
+    void asksForDeeperJfrStacksUnlessTheUserSetThemOrTheVmIsOpenJ9() {
+        String deep = "-XX:FlightRecorderOptions=stackdepth=256";
+
+        assertEquals(List.of("-Xmx1g", deep),
+                LaunchCommand.withDeepJfrStacks(List.of("-Xmx1g"), "OpenJDK 64-Bit Server VM"));
+        assertEquals(List.of("-XX:FlightRecorderOptions=stackdepth=64"),
+                LaunchCommand.withDeepJfrStacks(List.of("-XX:FlightRecorderOptions=stackdepth=64"), "Java HotSpot(TM)"));
+        assertEquals(List.of(), LaunchCommand.withDeepJfrStacks(List.of(), "Eclipse OpenJ9 VM"));
+    }
+
+    @Test
     void rejectsAMissingApplication() {
         assertThrows(IllegalArgumentException.class, () -> LaunchCommand.parse("--port=9090"));
         assertThrows(IllegalArgumentException.class, () -> LaunchCommand.parse("-cp", "lib/*"));

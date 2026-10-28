@@ -135,7 +135,7 @@ class QueryAnalyzerTest {
         CallNode mapperInJob = node("com.acme.OrderMapper.toDto", 10, 30, 30, false, List.of());
         CallNode job = node("com.acme.ImportJob.run", 1, 330, 100, true, List.of(), service, mapperInJob);
         RequestTrace trace = new RequestTrace(1, UnitKind.TASK, "TASK", "ImportJob.run", 0, Instant.now(),
-                Duration.ofMillis(330).toNanos(), queries, new CallTree(List.of(job), List.of(), false), 0);
+                Duration.ofMillis(330).toNanos(), queries, new CallTree(List.of(job), List.of(), false), 0, 1);
 
         List<Finding> findings = analyzer.analyze(trace).findings();
 
@@ -151,7 +151,7 @@ class QueryAnalyzerTest {
         CallNode render = node("com.acme.ReportService.render", 1, 400, 400, false, List.of());
         RequestTrace trace = new RequestTrace(1, UnitKind.HTTP, "GET", "/report", 200, Instant.now(),
                 Duration.ofMillis(400).toNanos(), List.of(), new CallTree(List.of(render), List.of(), false),
-                RequestTrace.WARM_UP_CLASSES);
+                RequestTrace.WARM_UP_CLASSES, 1);
 
         assertEquals(List.of(), analyzer.analyze(trace).findings());
     }

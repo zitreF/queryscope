@@ -17,12 +17,16 @@ public record AgentConfig(
         List<String> entryMethods,
         List<String> packages,
         boolean profile,
+        boolean sampling,
+        Duration sampleInterval,
         boolean openPanel,
         boolean printSummary
 ) {
 
     public static final AgentConfig DEFAULTS = new AgentConfig(7070, 5, Duration.ofMillis(100), 500, 30,
-            Duration.ofMillis(100), List.of(), List.of(), true, false, true);
+            Duration.ofMillis(100), List.of(), List.of(), true, true, Duration.ofMillis(10), false, true);
+
+    private static final int MAX_SAMPLE_MILLIS = 1000;
 
     private static final Pattern POSITIVE_NUMBER = Pattern.compile("[1-9][0-9]{0,8}");
     private static final Pattern ENTRY_METHOD = Pattern.compile("[\\p{L}_$][\\p{L}\\p{N}_$.]*#[\\p{L}_$][\\p{L}\\p{N}_$]*");
@@ -46,6 +50,8 @@ public record AgentConfig(
         List<String> entryMethods = new ArrayList<>();
         List<String> packages = new ArrayList<>();
         boolean profile = DEFAULTS.profile();
+        boolean sampling = DEFAULTS.sampling();
+        Duration sampleInterval = DEFAULTS.sampleInterval();
         boolean openPanel = DEFAULTS.openPanel();
         boolean printSummary = DEFAULTS.printSummary();
         for (String option : arguments.split(",")) {
@@ -62,15 +68,17 @@ public record AgentConfig(
                 case "entry" -> entryMethods.add(entryMethod(value));
                 case "package" -> packages.add(packageName(value));
                 case "profile" -> profile = flag(key, value);
+                case "sampling" -> sampling = flag(key, value);
+                case "sampleMs" -> sampleInterval = Duration.ofMillis(sampleMillis(value));
                 case "open" -> openPanel = flag(key, value);
                 case "summary" -> printSummary = flag(key, value);
                 default -> throw new IllegalArgumentException("Unknown QueryScope option '" + key
                         + "', known options are port, nPlusOneThreshold, slowQueryMs, largeResultRows, maxQueries,"
-                        + " slowMethodMs, entry, package, profile, open and summary");
+                        + " slowMethodMs, entry, package, profile, sampling, sampleMs, open and summary");
             }
         }
         return new AgentConfig(port, nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries,
-                slowMethodThreshold, entryMethods, packages, profile, openPanel, printSummary);
+                slowMethodThreshold, entryMethods, packages, profile, sampling, sampleInterval, openPanel, printSummary);
     }
 
     public Thresholds thresholds() {
@@ -83,6 +91,15 @@ public record AgentConfig(
                     "QueryScope option entry needs a class and a method like com.acme.ImportJob#run, got '" + value + "'");
         }
         return value;
+    }
+
+    private static int sampleMillis(String value) {
+        int millis = positiveNumber("sampleMs", value);
+        if (millis > MAX_SAMPLE_MILLIS) {
+            throw new IllegalArgumentException(
+                    "QueryScope option sampleMs must be at most " + MAX_SAMPLE_MILLIS + ", got " + millis);
+        }
+        return millis;
     }
 
     private static String packageName(String value) {
