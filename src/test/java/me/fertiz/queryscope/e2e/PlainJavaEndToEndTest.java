@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -28,6 +29,14 @@ class PlainJavaEndToEndTest {
     }
 
     @Test
+    void mentionsATaskThatWasStillOpenWhenTheProgramExited() throws Exception {
+        String output = run("", "e2e-plain-open.log", PlainJdbcApp.EXIT_WITHOUT_CLOSING);
+
+        assertTrue(output.contains("0 requests and tasks"), output);
+        assertTrue(output.contains("1 task was still open when the JVM stopped and is not counted"), output);
+    }
+
+    @Test
     void skipsTheSummaryWhenAskedTo() throws Exception {
         String output = run(",summary=false", "e2e-plain-no-summary.log");
 
@@ -35,13 +44,15 @@ class PlainJavaEndToEndTest {
         assertFalse(output.contains("QueryScope session summary"), output);
     }
 
-    private static String run(String options, String logName) throws Exception {
+    private static String run(String options, String logName, String... programArguments) throws Exception {
         Path log = Path.of("build", logName);
         Files.createDirectories(log.toAbsolutePath().getParent());
-        Process process = new ProcessBuilder(List.of(
+        List<String> command = new ArrayList<>(List.of(
                 DemoProcess.JAVA,
                 "-javaagent:" + DemoProcess.AGENT_JAR + "=port=" + DemoProcess.freePort() + options,
-                "-cp", DemoProcess.DEMO_CLASSPATH, PlainJdbcApp.class.getName()))
+                "-cp", DemoProcess.DEMO_CLASSPATH, PlainJdbcApp.class.getName()));
+        command.addAll(List.of(programArguments));
+        Process process = new ProcessBuilder(command)
                 .redirectErrorStream(true)
                 .redirectOutput(log.toFile())
                 .start();

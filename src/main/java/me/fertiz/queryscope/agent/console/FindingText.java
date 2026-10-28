@@ -11,19 +11,10 @@ import me.fertiz.queryscope.agent.findings.SlowQuery;
 import me.fertiz.queryscope.agent.findings.TooManyQueries;
 
 import java.util.Locale;
-import java.util.Map;
 
 final class FindingText {
 
     private static final int MAX_SQL_LENGTH = 160;
-    private static final Map<Class<? extends Finding>, String> BADGES = Map.of(
-            NPlusOne.class, "N+1",
-            RepeatedWrite.class, "Writes",
-            DuplicateQuery.class, "Duplicate",
-            SlowQuery.class, "Slow",
-            LargeResult.class, "Rows",
-            SlowMethod.class, "Code",
-            TooManyQueries.class, "Queries");
 
     private FindingText() {
     }
@@ -37,60 +28,84 @@ final class FindingText {
     }
 
     static String describeWithoutParameters(Finding finding) {
-        if (finding instanceof NPlusOne nPlusOne) {
-            return String.format(Locale.ROOT, "N+1: %d x %s%s", nPlusOne.executions(),
-                    shorten(nPlusOne.normalizedSql()), location(nPlusOne.callSite()));
-        }
-        if (finding instanceof RepeatedWrite write) {
-            return String.format(Locale.ROOT, "Unbatched writes: %d x %s%s", write.executions(),
-                    shorten(write.normalizedSql()), location(write.callSite()));
-        }
-        if (finding instanceof DuplicateQuery duplicate) {
-            return String.format(Locale.ROOT, "Duplicate query: %d x %s%s", duplicate.executions(),
-                    shorten(duplicate.normalizedSql()), location(duplicate.callSite()));
-        }
-        if (finding instanceof SlowQuery slow) {
-            return String.format(Locale.ROOT, "Slow query: %.1f ms %s%s", millis(slow.query().durationNanos()),
-                    shorten(slow.normalizedSql()), location(slow.query().callSite()));
-        }
-        if (finding instanceof LargeResult large) {
-            return String.format(Locale.ROOT, "Large result: %d rows from %s%s", large.query().rows(),
-                    shorten(large.normalizedSql()), location(large.query().callSite()));
-        }
-        if (finding instanceof SlowMethod slow) {
-            return String.format(Locale.ROOT, "Slow method: %s spent %.1f ms in its own code outside SQL over %d %s,"
-                            + " %.0f%% of the time", CallSites.shortName(slow.method()), millis(slow.ownNanos()),
-                    slow.calls(), slow.calls() == 1 ? "call" : "calls", share(slow.ownNanos(), slow.durationNanos()));
-        }
-        TooManyQueries tooMany = (TooManyQueries) finding;
-        return String.format(Locale.ROOT, "Too many queries: %d (limit %d), %.0f%% of the time in the database",
-                tooMany.queries(), tooMany.limit(), share(tooMany.databaseNanos(), tooMany.durationNanos()));
+        return switch (finding.kind()) {
+            case N_PLUS_ONE -> {
+                NPlusOne nPlusOne = (NPlusOne) finding;
+                yield String.format(Locale.ROOT, "N+1: %d x %s%s", nPlusOne.executions(),
+                        shorten(nPlusOne.normalizedSql()), location(nPlusOne.callSite()));
+            }
+            case REPEATED_WRITE -> {
+                RepeatedWrite write = (RepeatedWrite) finding;
+                yield String.format(Locale.ROOT, "Unbatched writes: %d x %s%s", write.executions(),
+                        shorten(write.normalizedSql()), location(write.callSite()));
+            }
+            case DUPLICATE_QUERY -> {
+                DuplicateQuery duplicate = (DuplicateQuery) finding;
+                yield String.format(Locale.ROOT, "Duplicate query: %d x %s%s", duplicate.executions(),
+                        shorten(duplicate.normalizedSql()), location(duplicate.callSite()));
+            }
+            case SLOW_QUERY -> {
+                SlowQuery slow = (SlowQuery) finding;
+                yield String.format(Locale.ROOT, "Slow query: %.1f ms %s%s", millis(slow.query().durationNanos()),
+                        shorten(slow.normalizedSql()), location(slow.query().callSite()));
+            }
+            case LARGE_RESULT -> {
+                LargeResult large = (LargeResult) finding;
+                yield String.format(Locale.ROOT, "Large result: %d rows from %s%s", large.query().rows(),
+                        shorten(large.normalizedSql()), location(large.query().callSite()));
+            }
+            case TOO_MANY_QUERIES -> {
+                TooManyQueries tooMany = (TooManyQueries) finding;
+                yield String.format(Locale.ROOT, "Too many queries: %d (limit %d), %.0f%% of the time in the database",
+                        tooMany.queries(), tooMany.limit(), share(tooMany.databaseNanos(), tooMany.durationNanos()));
+            }
+            case SLOW_METHOD -> {
+                SlowMethod slow = (SlowMethod) finding;
+                yield String.format(Locale.ROOT, "Slow method: %s spent %.1f ms in its own code outside SQL over %d %s,"
+                                + " %.0f%% of the time", CallSites.shortName(slow.method()), millis(slow.ownNanos()),
+                        slow.calls(), slow.calls() == 1 ? "call" : "calls", share(slow.ownNanos(), slow.durationNanos()));
+            }
+        };
     }
 
     static String badge(Finding finding) {
-        return BADGES.get(finding.getClass());
+        return switch (finding.kind()) {
+            case N_PLUS_ONE -> "N+1";
+            case REPEATED_WRITE -> "Writes";
+            case DUPLICATE_QUERY -> "Duplicate";
+            case SLOW_QUERY -> "Slow";
+            case LARGE_RESULT -> "Rows";
+            case TOO_MANY_QUERIES -> "Queries";
+            case SLOW_METHOD -> "Code";
+        };
     }
 
     static String groupKey(Finding finding, String endpoint) {
-        if (finding instanceof NPlusOne nPlusOne) {
-            return "nPlusOne|" + nPlusOne.normalizedSql() + "|" + nPlusOne.callSite();
-        }
-        if (finding instanceof RepeatedWrite write) {
-            return "write|" + write.normalizedSql() + "|" + write.callSite();
-        }
-        if (finding instanceof DuplicateQuery duplicate) {
-            return "duplicate|" + duplicate.normalizedSql() + "|" + duplicate.callSite();
-        }
-        if (finding instanceof SlowQuery slow) {
-            return "slow|" + slow.normalizedSql() + "|" + slow.query().callSite();
-        }
-        if (finding instanceof LargeResult large) {
-            return "rows|" + large.normalizedSql() + "|" + large.query().callSite();
-        }
-        if (finding instanceof SlowMethod slow) {
-            return "method|" + slow.method();
-        }
-        return "queries|" + endpoint;
+        String detail = switch (finding.kind()) {
+            case N_PLUS_ONE -> {
+                NPlusOne nPlusOne = (NPlusOne) finding;
+                yield nPlusOne.normalizedSql() + "|" + nPlusOne.callSite();
+            }
+            case REPEATED_WRITE -> {
+                RepeatedWrite write = (RepeatedWrite) finding;
+                yield write.normalizedSql() + "|" + write.callSite();
+            }
+            case DUPLICATE_QUERY -> {
+                DuplicateQuery duplicate = (DuplicateQuery) finding;
+                yield duplicate.normalizedSql() + "|" + duplicate.callSite();
+            }
+            case SLOW_QUERY -> {
+                SlowQuery slow = (SlowQuery) finding;
+                yield slow.normalizedSql() + "|" + slow.query().callSite();
+            }
+            case LARGE_RESULT -> {
+                LargeResult large = (LargeResult) finding;
+                yield large.normalizedSql() + "|" + large.query().callSite();
+            }
+            case TOO_MANY_QUERIES -> endpoint;
+            case SLOW_METHOD -> ((SlowMethod) finding).method();
+        };
+        return finding.kind() + "|" + detail;
     }
 
     static double millis(long nanos) {

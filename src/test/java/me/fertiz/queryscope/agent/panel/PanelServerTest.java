@@ -52,6 +52,8 @@ class PanelServerTest {
         assertEquals(200, page.statusCode());
         assertTrue(page.body().contains("<title>QueryScope</title>"));
         assertEquals("no-cache", page.headers().firstValue("Cache-Control").orElseThrow());
+        assertEquals("DENY", page.headers().firstValue("X-Frame-Options").orElseThrow());
+        assertEquals("frame-ancestors 'none'", page.headers().firstValue("Content-Security-Policy").orElseThrow());
         assertEquals(404, get("/missing.js").statusCode());
     }
 

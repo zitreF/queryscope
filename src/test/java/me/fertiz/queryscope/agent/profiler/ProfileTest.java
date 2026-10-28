@@ -96,6 +96,22 @@ class ProfileTest {
     }
 
     @Test
+    void threadListLeavesOutQueryScopeSamples() {
+        sample(1, NOW, RUN, RENDER);
+        sample(2, NOW, RUN, "me.fertiz.queryscope.agent.AgentInstaller.install");
+        sample(2, NOW, RUN, "me.fertiz.queryscope.agent.AgentInstaller.install");
+
+        Profile all = Profile.build(store, ACME, everything(false));
+        Profile secondThread = Profile.build(store, ACME,
+                new Profile.Filter(0, Long.MAX_VALUE, 2, false, false, List.of()));
+
+        assertEquals(List.of(1L), all.threads().stream().map(Profile.ThreadSamples::id).toList());
+        assertEquals(2, all.agentSamples());
+        assertEquals(0, secondThread.samples());
+        assertEquals(2, secondThread.agentSamples());
+    }
+
+    @Test
     void putsTruncatedStacksUnderTheirOwnRoot() {
         store.add(NOW, 1, "worker", true, true, List.of(RENDER, APPEND));
 

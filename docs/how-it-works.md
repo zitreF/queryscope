@@ -225,7 +225,8 @@ up an application thread.
 **Security.** The panel and the hub listen on loopback only and reject requests whose `Host` header is not
 `localhost`, `127.0.0.1` or `[::1]`, which stops DNS rebinding. The hub's attach endpoint, the only one that changes
 anything outside QueryScope, also requires a JSON content type and a same-origin `Origin` header, so a web page on
-another site cannot trigger an attach from the user's browser.
+another site cannot trigger an attach from the user's browser. Both pages are sent with `X-Frame-Options: DENY` and
+`frame-ancestors 'none'`, so another site cannot load them in a hidden frame and trick a click onto **Attach**.
 
 **Frontend.** The panel is plain HTML, CSS and JavaScript with no build step and no external requests. It loads the
 stored reports once, then follows the SSE stream. The live stream is drawn on a canvas, the flame graph is laid out as
@@ -249,7 +250,9 @@ Everything QueryScope keeps has a limit:
 
 QueryScope's threads are daemons, so they never keep the application alive: `queryscope-panel-*` for the panel,
 `queryscope-flight-recorder` for the sampler, `queryscope-sampler-start` and `queryscope-panel-start` for startup, and
-`queryscope-summary` as the shutdown hook. Samples taken on QueryScope's own threads are dropped.
+`queryscope-summary` as the shutdown hook. Samples taken on QueryScope's own threads are dropped. A finished unit is
+analyzed on the thread that ran it, because a report handed to another thread right before the JVM stops would lose
+its log line: logging frameworks close their handlers in shutdown hooks of their own.
 
 ## Overhead
 

@@ -67,8 +67,8 @@ public final class SessionSummary implements Consumer<RequestReport> {
         }
     }
 
-    public synchronized void print(PrintStream out, Profile profile) {
-        if (units == 0 && profile.samples() == 0) {
+    public synchronized void print(PrintStream out, Profile profile, int openTasks) {
+        if (units == 0 && profile.samples() == 0 && openTasks == 0) {
             return;
         }
         out.println();
@@ -76,6 +76,10 @@ public final class SessionSummary implements Consumer<RequestReport> {
                 duration(Duration.between(startedAt, clock.instant())),
                 units, units == 1 ? "request or task" : "requests and tasks", queries, queries == 1 ? "query" : "queries",
                 profile.samples(), profile.samples() == 1 ? "sample" : "samples");
+        if (openTasks > 0) {
+            out.printf(Locale.ROOT, "  %d %s still open when the JVM stopped and %s not counted%n", openTasks,
+                    openTasks == 1 ? "task was" : "tasks were", openTasks == 1 ? "is" : "are");
+        }
         if (units > 0) {
             printEndpoints(out);
             printFindings(out);

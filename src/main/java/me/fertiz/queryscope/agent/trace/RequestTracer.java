@@ -5,6 +5,7 @@ import me.fertiz.queryscope.agent.calltree.CallTracer;
 
 
 import java.sql.ResultSet;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -13,6 +14,7 @@ public final class RequestTracer {
     private static final System.Logger LOGGER = System.getLogger("QueryScope");
     private static final ThreadLocal<ActiveRequest> CURRENT = new ThreadLocal<>();
     private static final AtomicLong IDS = new AtomicLong();
+    private static final AtomicInteger OPEN_TASKS = new AtomicInteger();
     private static final WeakIdentityMap<StatementState> STATEMENTS = new WeakIdentityMap<>();
     private static final WeakIdentityMap<QueryRecord> RESULTS = new WeakIdentityMap<>();
     private static final int NO_STATUS = 0;
@@ -25,6 +27,10 @@ public final class RequestTracer {
 
     public static void publishTo(Consumer<RequestTrace> listener) {
         RequestTracer.listener = listener;
+    }
+
+    public static int openTaskCount() {
+        return OPEN_TASKS.get();
     }
 
     public static boolean inForegroundUnit() {
@@ -80,6 +86,9 @@ public final class RequestTracer {
     }
 
     public static void rowRead(Object resultSet) {
+        if (CURRENT.get() == null) {
+            return;
+        }
         QueryRecord query = RESULTS.get(resultSet);
         if (query != null) {
             query.rowRead();
@@ -95,6 +104,7 @@ public final class RequestTracer {
         if (current == null) {
             current = ActiveRequest.background(IDS.incrementAndGet(), taskName());
             CURRENT.set(current);
+            OPEN_TASKS.incrementAndGet();
         }
         current.enterQuery();
     }
@@ -161,6 +171,9 @@ public final class RequestTracer {
 
     private static void finish(ActiveRequest request, int status, long endNanos) {
         CURRENT.remove();
+        if (request.isBackground()) {
+            OPEN_TASKS.decrementAndGet();
+        }
         RequestTrace trace = request.finish(status, endNanos);
         try {
             listener.accept(trace);

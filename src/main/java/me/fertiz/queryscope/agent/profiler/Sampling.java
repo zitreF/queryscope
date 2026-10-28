@@ -51,15 +51,19 @@ public final class Sampling {
         return hidden < 0 ? name : name.substring(0, hidden);
     }
 
-    private void begin(SampleStore store, Duration interval) {
+    private synchronized void begin(SampleStore store, Duration interval) {
         try {
-            stop = JfrSampler.start(store, interval);
+            stop = JfrSampler.start(store, interval, () -> startThreadDumps(store, interval));
             store.started(JfrSampler.SOURCE, interval);
         } catch (LinkageError | RuntimeException e) {
             LOGGER.log(System.Logger.Level.INFO, "QueryScope falls back to thread dumps for sampling: " + e);
-            Duration dumpInterval = interval.compareTo(SHORTEST_DUMP_INTERVAL) < 0 ? SHORTEST_DUMP_INTERVAL : interval;
-            stop = ThreadDumpSampler.start(store, dumpInterval);
-            store.started(ThreadDumpSampler.SOURCE, dumpInterval);
+            startThreadDumps(store, interval);
         }
+    }
+
+    private synchronized void startThreadDumps(SampleStore store, Duration interval) {
+        Duration dumpInterval = interval.compareTo(SHORTEST_DUMP_INTERVAL) < 0 ? SHORTEST_DUMP_INTERVAL : interval;
+        stop = ThreadDumpSampler.start(store, dumpInterval);
+        store.started(ThreadDumpSampler.SOURCE, dumpInterval);
     }
 }

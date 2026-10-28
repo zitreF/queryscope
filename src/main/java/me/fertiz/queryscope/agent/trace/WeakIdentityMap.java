@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 final class WeakIdentityMap<V> {
 
-    private final Map<IdentityKey, V> values = new ConcurrentHashMap<>();
+    private final Map<Object, V> values = new ConcurrentHashMap<>();
     private final ReferenceQueue<Object> collected = new ReferenceQueue<>();
 
     void put(Object key, V value) {
@@ -17,7 +17,7 @@ final class WeakIdentityMap<V> {
     }
 
     V get(Object key) {
-        return values.get(new IdentityKey(key, null));
+        return values.get(new Probe(key));
     }
 
     int size() {
@@ -29,6 +29,19 @@ final class WeakIdentityMap<V> {
         Reference<?> key;
         while ((key = collected.poll()) != null) {
             values.remove(key);
+        }
+    }
+
+    private record Probe(Object key) {
+
+        @Override
+        public int hashCode() {
+            return System.identityHashCode(key);
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof IdentityKey stored && stored.get() == key;
         }
     }
 

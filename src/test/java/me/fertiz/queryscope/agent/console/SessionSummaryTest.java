@@ -74,6 +74,13 @@ class SessionSummaryTest {
     }
 
     @Test
+    void mentionsTasksThatWereStillOpenWhenTheJvmStopped() {
+        assertTrue(print(1).contains("  1 task was still open when the JVM stopped and is not counted"), print(1));
+        assertTrue(print(3).contains("  3 tasks were still open when the JVM stopped and are not counted"), print(3));
+        assertFalse(print(0).contains("still open"));
+    }
+
+    @Test
     void countsADuplicateQueryOnceWhateverItsParameters() {
         String sql = "select * from customers where id = ?";
         summary.accept(http("/api/customers/7/card", 2, List.of(new DuplicateQuery(sql, "[7]", MAPPER, List.of(0, 1)))));
@@ -103,9 +110,13 @@ class SessionSummaryTest {
     }
 
     private String print() {
+        return print(0);
+    }
+
+    private String print(int openTasks) {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         Profile profile = Profile.build(samples, AppPackages.of(List.of("com.acme")), Profile.Filter.everything());
-        summary.print(new PrintStream(bytes, true, StandardCharsets.UTF_8), profile);
+        summary.print(new PrintStream(bytes, true, StandardCharsets.UTF_8), profile, openTasks);
         return bytes.toString(StandardCharsets.UTF_8);
     }
 

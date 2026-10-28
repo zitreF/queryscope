@@ -92,42 +92,59 @@ final class ReportJson {
     }
 
     private static void write(JsonWriter json, Finding finding) {
-        json.beginObject();
-        if (finding instanceof NPlusOne nPlusOne) {
-            repeatedStatement(json, "nPlusOne", nPlusOne.normalizedSql(), nPlusOne.callSite(),
-                    nPlusOne.queryIndexes(), nPlusOne.totalNanos());
-        } else if (finding instanceof RepeatedWrite write) {
-            repeatedStatement(json, "repeatedWrite", write.normalizedSql(), write.callSite(),
-                    write.queryIndexes(), write.totalNanos());
-        } else if (finding instanceof DuplicateQuery duplicate) {
-            json.name("type").value("duplicateQuery")
-                    .name("sql").value(duplicate.normalizedSql())
-                    .name("parameters").value(duplicate.parameters())
-                    .name("callSite").value(duplicate.callSite())
-                    .name("executions").value(duplicate.executions());
-            indexes(json, "queryIndexes", duplicate.queryIndexes());
-        } else if (finding instanceof SlowQuery slow) {
-            queryFinding(json, "slowQuery", slow.normalizedSql(), slow.query())
-                    .name("durationMs").value(millis(slow.query().durationNanos()))
-                    .name("queryIndex").value(slow.queryIndex());
-        } else if (finding instanceof LargeResult large) {
-            queryFinding(json, "largeResult", large.normalizedSql(), large.query())
-                    .name("rows").value(large.query().rows())
-                    .name("queryIndex").value(large.queryIndex());
-        } else if (finding instanceof TooManyQueries tooMany) {
-            json.name("type").value("tooManyQueries")
-                    .name("queries").value(tooMany.queries())
-                    .name("limit").value(tooMany.limit())
-                    .name("databaseMs").value(millis(tooMany.databaseNanos()))
-                    .name("durationMs").value(millis(tooMany.durationNanos()));
-        } else if (finding instanceof SlowMethod method) {
-            json.name("type").value("slowMethod")
-                    .name("method").value(method.method())
-                    .name("calls").value(method.calls())
-                    .name("ownMs").value(millis(method.ownNanos()))
-                    .name("durationMs").value(millis(method.durationNanos()));
-        }
-        json.endObject();
+        writeFindingFields(json.beginObject(), finding).endObject();
+    }
+
+    private static JsonWriter writeFindingFields(JsonWriter json, Finding finding) {
+        return switch (finding.kind()) {
+            case N_PLUS_ONE -> {
+                NPlusOne nPlusOne = (NPlusOne) finding;
+                yield repeatedStatement(json, "nPlusOne", nPlusOne.normalizedSql(), nPlusOne.callSite(),
+                        nPlusOne.queryIndexes(), nPlusOne.totalNanos());
+            }
+            case REPEATED_WRITE -> {
+                RepeatedWrite write = (RepeatedWrite) finding;
+                yield repeatedStatement(json, "repeatedWrite", write.normalizedSql(), write.callSite(),
+                        write.queryIndexes(), write.totalNanos());
+            }
+            case DUPLICATE_QUERY -> {
+                DuplicateQuery duplicate = (DuplicateQuery) finding;
+                json.name("type").value("duplicateQuery")
+                        .name("sql").value(duplicate.normalizedSql())
+                        .name("parameters").value(duplicate.parameters())
+                        .name("callSite").value(duplicate.callSite())
+                        .name("executions").value(duplicate.executions());
+                yield indexes(json, "queryIndexes", duplicate.queryIndexes());
+            }
+            case SLOW_QUERY -> {
+                SlowQuery slow = (SlowQuery) finding;
+                yield queryFinding(json, "slowQuery", slow.normalizedSql(), slow.query())
+                        .name("durationMs").value(millis(slow.query().durationNanos()))
+                        .name("queryIndex").value(slow.queryIndex());
+            }
+            case LARGE_RESULT -> {
+                LargeResult large = (LargeResult) finding;
+                yield queryFinding(json, "largeResult", large.normalizedSql(), large.query())
+                        .name("rows").value(large.query().rows())
+                        .name("queryIndex").value(large.queryIndex());
+            }
+            case TOO_MANY_QUERIES -> {
+                TooManyQueries tooMany = (TooManyQueries) finding;
+                yield json.name("type").value("tooManyQueries")
+                        .name("queries").value(tooMany.queries())
+                        .name("limit").value(tooMany.limit())
+                        .name("databaseMs").value(millis(tooMany.databaseNanos()))
+                        .name("durationMs").value(millis(tooMany.durationNanos()));
+            }
+            case SLOW_METHOD -> {
+                SlowMethod method = (SlowMethod) finding;
+                yield json.name("type").value("slowMethod")
+                        .name("method").value(method.method())
+                        .name("calls").value(method.calls())
+                        .name("ownMs").value(millis(method.ownNanos()))
+                        .name("durationMs").value(millis(method.durationNanos()));
+            }
+        };
     }
 
     private static void write(JsonWriter json, CallNode node) {
@@ -149,20 +166,20 @@ final class ReportJson {
                 .name("callSite").value(query.callSite());
     }
 
-    private static void repeatedStatement(JsonWriter json, String type, String sql, String callSite,
-                                          List<Integer> queryIndexes, long totalNanos) {
+    private static JsonWriter repeatedStatement(JsonWriter json, String type, String sql, String callSite,
+                                                List<Integer> queryIndexes, long totalNanos) {
         json.name("type").value(type)
                 .name("sql").value(sql)
                 .name("callSite").value(callSite)
                 .name("executions").value(queryIndexes.size())
                 .name("totalMs").value(millis(totalNanos));
-        indexes(json, "queryIndexes", queryIndexes);
+        return indexes(json, "queryIndexes", queryIndexes);
     }
 
-    private static void indexes(JsonWriter json, String name, List<Integer> queryIndexes) {
+    private static JsonWriter indexes(JsonWriter json, String name, List<Integer> queryIndexes) {
         json.name(name).beginArray();
         queryIndexes.forEach(index -> json.value(index));
-        json.endArray();
+        return json.endArray();
     }
 
     private static double millis(long nanos) {

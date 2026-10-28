@@ -47,10 +47,7 @@ public final class Profile {
             if ((!filter.includeNative() && !sample.onCpu()) || !filter.includes(sample)) {
                 continue;
             }
-            perThread.merge(sample.threadId(), 1, Integer::sum);
-            if (filter.threadId() != Filter.ALL_THREADS && sample.threadId() != filter.threadId()) {
-                continue;
-            }
+            boolean selectedThread = filter.threadId() == Filter.ALL_THREADS || sample.threadId() == filter.threadId();
             Frame[] stack = new Frame[sample.frames().length];
             boolean inAgent = false;
             for (int index = 0; index < stack.length; index++) {
@@ -58,7 +55,13 @@ public final class Profile {
                 inAgent |= stack[index].agent();
             }
             if (inAgent) {
-                agentSamples++;
+                if (selectedThread) {
+                    agentSamples++;
+                }
+                continue;
+            }
+            perThread.merge(sample.threadId(), 1, Integer::sum);
+            if (!selectedThread) {
                 continue;
             }
             samples++;

@@ -6,8 +6,11 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 
 public final class PlainJdbcApp {
+
+    public static final String EXIT_WITHOUT_CLOSING = "exit-without-closing";
 
     private static final int BOOKS = 10;
 
@@ -22,6 +25,9 @@ public final class PlainJdbcApp {
             }
             for (int id = 1; id <= BOOKS; id++) {
                 System.out.println(title(connection, id));
+            }
+            if (List.of(arguments).contains(EXIT_WITHOUT_CLOSING)) {
+                System.exit(0);
             }
         }
     }

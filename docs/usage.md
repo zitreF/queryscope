@@ -317,8 +317,10 @@ QueryScope session summary: 2 min 15 s, 83 requests and tasks, 1215 queries, 736
 The hottest methods here are H2's, because the demo's database runs inside the same JVM; with a separate database
 server they would be your code, your libraries and the JDBC driver.
 
-IDs in paths are folded, so `/api/customers/7` and `/api/customers/8` count as `GET /api/customers/{id}`. A program that
-never runs SQL still gets the hottest methods, which makes the summary a quick profiler for command line tools.
+IDs in paths are folded, so `/api/customers/7` and `/api/customers/8` count as `GET /api/customers/{id}`, and one
+finding counts once per request whatever its parameters. A task whose connection was still open when the JVM stopped
+was never finished, so it is not in the table; the summary says how many there were. A program that never runs SQL
+still gets the hottest methods, which makes the summary a quick profiler for command line tools.
 
 ## Scripts and tests
 

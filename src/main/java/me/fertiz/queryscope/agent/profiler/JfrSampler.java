@@ -11,6 +11,7 @@ import jdk.jfr.consumer.RecordingStream;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 final class JfrSampler {
 
@@ -18,11 +19,12 @@ final class JfrSampler {
 
     private static final String EXECUTION_SAMPLE = "jdk.ExecutionSample";
     private static final String NATIVE_SAMPLE = "jdk.NativeMethodSample";
+    private static final System.Logger LOGGER = System.getLogger("QueryScope");
 
     private JfrSampler() {
     }
 
-    static Runnable start(SampleStore store, Duration interval) {
+    static Runnable start(SampleStore store, Duration interval, Runnable fallback) {
         if (!FlightRecorder.isAvailable()) {
             throw new IllegalStateException("JDK Flight Recorder is not available in this JVM");
         }
@@ -31,10 +33,27 @@ final class JfrSampler {
         stream.enable(NATIVE_SAMPLE).withPeriod(interval);
         stream.onEvent(EXECUTION_SAMPLE, event -> record(store, event, true));
         stream.onEvent(NATIVE_SAMPLE, event -> record(store, event, false));
-        Thread consumer = new Thread(stream::start, Sampling.OWN_THREADS + "flight-recorder");
+        AtomicBoolean stopping = new AtomicBoolean();
+        Thread consumer = new Thread(() -> consume(stream::start, stopping, fallback),
+                Sampling.OWN_THREADS + "flight-recorder");
         consumer.setDaemon(true);
         consumer.start();
-        return () -> stop(stream);
+        return () -> {
+            stopping.set(true);
+            stop(stream);
+        };
+    }
+
+    static void consume(Runnable startStream, AtomicBoolean stopping, Runnable fallback) {
+        try {
+            startStream.run();
+        } catch (RuntimeException | Error e) {
+            if (!stopping.get()) {
+                LOGGER.log(System.Logger.Level.INFO, "QueryScope falls back to thread dumps because Flight Recorder"
+                        + " stopped: " + e);
+                fallback.run();
+            }
+        }
     }
 
     private static void stop(RecordingStream stream) {

@@ -36,6 +36,8 @@ public final class HttpSupport {
                 status(exchange, 404);
             } else if (allow(exchange, "GET")) {
                 exchange.getResponseHeaders().set("Cache-Control", "no-cache");
+                exchange.getResponseHeaders().set("X-Frame-Options", "DENY");
+                exchange.getResponseHeaders().set("Content-Security-Policy", "frame-ancestors 'none'");
                 send(exchange, 200, asset.type(), asset.content());
             }
         };

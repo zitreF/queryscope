@@ -82,7 +82,8 @@ public final class QueryScopeAgent {
                 if (sampling != null) {
                     sampling.stop();
                 }
-                summary.print(System.out, Profile.build(samples, application, Profile.Filter.everything()));
+                summary.print(System.out, Profile.build(samples, application, Profile.Filter.everything()),
+                        RequestTracer.openTaskCount());
             }, "queryscope-summary"));
         }
     }
@@ -94,11 +95,11 @@ public final class QueryScopeAgent {
             return;
         }
         RequestReport report = analyzer.analyze(trace);
+        store.add(report);
+        summary.accept(report);
         if (ranSql || !report.findings().isEmpty()) {
             console.log(report);
         }
-        store.add(report);
-        summary.accept(report);
     }
 
     private static void logCallTree(AppPackages application) {

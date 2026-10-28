@@ -38,6 +38,8 @@ class HubServerTest {
 
         assertEquals(200, page.statusCode());
         assertTrue(page.body().contains("Java processes on this computer"));
+        assertEquals("DENY", page.headers().firstValue("X-Frame-Options").orElseThrow());
+        assertEquals("frame-ancestors 'none'", page.headers().firstValue("Content-Security-Policy").orElseThrow());
         assertEquals(200, get("/hub.js").statusCode());
         assertEquals(200, get("/panel.css").statusCode());
     }
