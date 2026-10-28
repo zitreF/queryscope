@@ -42,8 +42,8 @@ class AgentConfigTest {
 
         assertEquals(List.of("com.acme.shop", "com.acme.billing"), config.packages());
         assertEquals(Duration.ofMillis(40), config.slowMethodThreshold());
-        assertTrue(config.profile());
-        assertFalse(AgentConfig.parse("profile=false").profile());
+        assertTrue(config.callTree());
+        assertFalse(AgentConfig.parse("profile=false").callTree());
         assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("package=com..acme"));
         assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("package=com.acme.*"));
     }

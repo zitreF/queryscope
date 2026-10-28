@@ -1,11 +1,11 @@
 package me.fertiz.queryscope.agent.panel;
 
-import me.fertiz.queryscope.agent.data.NPlusOne;
-import me.fertiz.queryscope.agent.data.QueryExecution;
-import me.fertiz.queryscope.agent.data.RequestReport;
-import me.fertiz.queryscope.agent.data.RequestTrace;
-import me.fertiz.queryscope.agent.data.SlowQuery;
-import me.fertiz.queryscope.agent.data.UnitKind;
+import me.fertiz.queryscope.agent.findings.NPlusOne;
+import me.fertiz.queryscope.agent.findings.RequestReport;
+import me.fertiz.queryscope.agent.findings.SlowQuery;
+import me.fertiz.queryscope.agent.trace.QueryExecution;
+import me.fertiz.queryscope.agent.trace.RequestTrace;
+import me.fertiz.queryscope.agent.trace.UnitKind;
 
 import java.time.Instant;
 import java.util.List;
@@ -37,6 +37,6 @@ final class Reports {
         return new RequestReport(trace, List.of(
                 new NPlusOne("select * from orders where customer_id = ?", "com.acme.Mapper.toDto(Mapper.java:7)",
                         List.of(0, 1), 120_500_000),
-                new SlowQuery(1, second)));
+                new SlowQuery(1, "select * from orders where customer_id = ?", second)));
     }
 }

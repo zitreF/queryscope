@@ -1,16 +1,17 @@
 package me.fertiz.queryscope.agent.panel;
 
-import me.fertiz.queryscope.agent.data.CallNode;
-import me.fertiz.queryscope.agent.data.CallTree;
-import me.fertiz.queryscope.agent.data.DuplicateQuery;
-import me.fertiz.queryscope.agent.data.LargeResult;
-import me.fertiz.queryscope.agent.data.QueryExecution;
-import me.fertiz.queryscope.agent.data.RepeatedWrite;
-import me.fertiz.queryscope.agent.data.RequestReport;
-import me.fertiz.queryscope.agent.data.RequestTrace;
-import me.fertiz.queryscope.agent.data.SlowMethod;
-import me.fertiz.queryscope.agent.data.TooManyQueries;
-import me.fertiz.queryscope.agent.data.UnitKind;
+import me.fertiz.queryscope.agent.calltree.CallNode;
+import me.fertiz.queryscope.agent.calltree.CallTree;
+import me.fertiz.queryscope.agent.findings.DuplicateQuery;
+import me.fertiz.queryscope.agent.findings.LargeResult;
+import me.fertiz.queryscope.agent.findings.RepeatedWrite;
+import me.fertiz.queryscope.agent.findings.RequestReport;
+import me.fertiz.queryscope.agent.findings.SlowMethod;
+import me.fertiz.queryscope.agent.findings.TooManyQueries;
+import me.fertiz.queryscope.agent.http.JsonWriter;
+import me.fertiz.queryscope.agent.trace.QueryExecution;
+import me.fertiz.queryscope.agent.trace.RequestTrace;
+import me.fertiz.queryscope.agent.trace.UnitKind;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -35,12 +36,12 @@ class ReportJsonTest {
                 + "\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"durationMs\":120.000,\"queryIndex\":1}],"
                 + "\"methods\":0}";
 
-        assertEquals(expected, ReportJson.of(Reports.withFindings()));
+        assertEquals(expected, ReportJson.event(Reports.withFindings()));
     }
 
     @Test
     void writesListsAndNullCallSites() {
-        String json = ReportJson.of(List.of(Reports.plain(2, "/b"), Reports.plain(1, "/a")));
+        String json = ReportJson.list(List.of(Reports.plain(2, "/b"), Reports.plain(1, "/a")));
 
         assertEquals("[{\"id\":2,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/b\",\"status\":200,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":2.000,\"queries\":[{\"sql\":\"select 1\","
@@ -58,10 +59,10 @@ class ReportJsonTest {
         RequestTrace trace = new RequestTrace(9, UnitKind.TASK, "TASK", "ImportJob.run", 0, Reports.STARTED_AT,
                 2_000_000, List.of(query));
 
-        String json = ReportJson.of(new RequestReport(trace, List.of(
+        String json = ReportJson.event(new RequestReport(trace, List.of(
                 new RepeatedWrite("insert into events values (?)", null, List.of(0), 1_000_000),
                 new DuplicateQuery("select * from events where id = ?", "[1]", null, List.of(0, 0)),
-                new LargeResult(0, query),
+                new LargeResult(0, "select * from events", query),
                 new TooManyQueries(31, 30, 1_000_000, 2_000_000),
                 new SlowMethod("com.acme.ImportJob.parse", 4, 1_500_000, 2_000_000))));
 
@@ -85,7 +86,7 @@ class ReportJsonTest {
         RequestTrace trace = new RequestTrace(4, UnitKind.HTTP, "GET", "/orders", 200, Reports.STARTED_AT, 2_000_000,
                 List.of(), new CallTree(List.of(list), List.of(2), false), 3, 1);
 
-        String json = ReportJson.ofCalls(new RequestReport(trace, List.of()), List.of("com.acme"));
+        String json = ReportJson.calls(new RequestReport(trace, List.of()), List.of("com.acme"));
 
         assertEquals("{\"id\":4,\"durationMs\":2.000,\"packages\":[\"com.acme\"],\"truncated\":false,"
                 + "\"classesLoaded\":3,\"warmUp\":false,\"outsideQueryIndexes\":[2],\"methods\":["

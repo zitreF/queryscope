@@ -1,6 +1,6 @@
 package me.fertiz.queryscope.agent;
 
-import me.fertiz.queryscope.agent.analysis.Thresholds;
+import me.fertiz.queryscope.agent.findings.Thresholds;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -16,7 +16,7 @@ public record AgentConfig(
         Duration slowMethodThreshold,
         List<String> entryMethods,
         List<String> packages,
-        boolean profile,
+        boolean callTree,
         boolean sampling,
         Duration sampleInterval,
         boolean openPanel,
@@ -29,8 +29,9 @@ public record AgentConfig(
     private static final int MAX_SAMPLE_MILLIS = 1000;
 
     private static final Pattern POSITIVE_NUMBER = Pattern.compile("[1-9][0-9]{0,8}");
-    private static final Pattern ENTRY_METHOD = Pattern.compile("[\\p{L}_$][\\p{L}\\p{N}_$.]*#[\\p{L}_$][\\p{L}\\p{N}_$]*");
-    private static final Pattern PACKAGE = Pattern.compile("[\\p{L}_$][\\p{L}\\p{N}_$]*(\\.[\\p{L}_$][\\p{L}\\p{N}_$]*)*");
+    private static final String IDENTIFIER = "[\\p{L}_$][\\p{L}\\p{N}_$]*";
+    private static final Pattern PACKAGE = Pattern.compile(IDENTIFIER + "(\\." + IDENTIFIER + ")*");
+    private static final Pattern ENTRY_METHOD = Pattern.compile(PACKAGE.pattern() + "#" + IDENTIFIER);
 
     public AgentConfig {
         entryMethods = List.copyOf(entryMethods);
@@ -49,12 +50,15 @@ public record AgentConfig(
         Duration slowMethodThreshold = DEFAULTS.slowMethodThreshold();
         List<String> entryMethods = new ArrayList<>();
         List<String> packages = new ArrayList<>();
-        boolean profile = DEFAULTS.profile();
+        boolean callTree = DEFAULTS.callTree();
         boolean sampling = DEFAULTS.sampling();
         Duration sampleInterval = DEFAULTS.sampleInterval();
         boolean openPanel = DEFAULTS.openPanel();
         boolean printSummary = DEFAULTS.printSummary();
         for (String option : arguments.split(",")) {
+            if (option.isBlank()) {
+                continue;
+            }
             String[] keyAndValue = option.split("=", 2);
             String key = keyAndValue[0].trim();
             String value = keyAndValue.length == 2 ? keyAndValue[1].trim() : "";
@@ -67,7 +71,7 @@ public record AgentConfig(
                 case "slowMethodMs" -> slowMethodThreshold = Duration.ofMillis(positiveNumber(key, value));
                 case "entry" -> entryMethods.add(entryMethod(value));
                 case "package" -> packages.add(packageName(value));
-                case "profile" -> profile = flag(key, value);
+                case "profile" -> callTree = flag(key, value);
                 case "sampling" -> sampling = flag(key, value);
                 case "sampleMs" -> sampleInterval = Duration.ofMillis(sampleMillis(value));
                 case "open" -> openPanel = flag(key, value);
@@ -78,7 +82,7 @@ public record AgentConfig(
             }
         }
         return new AgentConfig(port, nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries,
-                slowMethodThreshold, entryMethods, packages, profile, sampling, sampleInterval, openPanel, printSummary);
+                slowMethodThreshold, entryMethods, packages, callTree, sampling, sampleInterval, openPanel, printSummary);
     }
 
     public Thresholds thresholds() {
@@ -110,7 +114,7 @@ public record AgentConfig(
         return value;
     }
 
-    private static boolean flag(String key, String value) {
+    public static boolean flag(String key, String value) {
         return switch (value) {
             case "", "true" -> true;
             case "false" -> false;
@@ -119,7 +123,7 @@ public record AgentConfig(
         };
     }
 
-    private static int portNumber(String value) {
+    public static int portNumber(String value) {
         int port = positiveNumber("port", value);
         if (port > 65535) {
             throw new IllegalArgumentException("QueryScope option port must be at most 65535, got " + port);

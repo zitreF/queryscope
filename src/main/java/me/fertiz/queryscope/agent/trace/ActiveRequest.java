@@ -1,19 +1,22 @@
 package me.fertiz.queryscope.agent.trace;
 
-import me.fertiz.queryscope.agent.data.CallTree;
-import me.fertiz.queryscope.agent.data.RequestTrace;
-import me.fertiz.queryscope.agent.data.UnitKind;
+import me.fertiz.queryscope.agent.calltree.CallTracer;
+import me.fertiz.queryscope.agent.calltree.CallTree;
+import me.fertiz.queryscope.agent.calltree.CallTreeBuilder;
 
 import java.lang.management.ClassLoadingMXBean;
 import java.lang.management.ManagementFactory;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 final class ActiveRequest {
 
     private static final String TASK_METHOD = "TASK";
     private static final ClassLoadingMXBean CLASSES = ManagementFactory.getClassLoadingMXBean();
+    private static final long BACKGROUND_IDLE_NANOS = TimeUnit.SECONDS.toNanos(1);
+    private static final int BACKGROUND_MAX_QUERIES = 1000;
 
     private final long id;
     private final UnitKind kind;
@@ -58,18 +61,24 @@ final class ActiveRequest {
         return queryDepth == 0;
     }
 
-    boolean isIdleSince(long nanos, long idleNanos, int maxQueries) {
-        return queryDepth == 0 && (nanos - queryFinishedNanos > idleNanos || queries.size() >= maxQueries);
+    boolean isExpired(long nanos) {
+        return queryDepth == 0
+                && (nanos - queryFinishedNanos > BACKGROUND_IDLE_NANOS || queries.size() >= BACKGROUND_MAX_QUERIES);
     }
 
     void enterQuery() {
-        if (queryDepth++ == 0) {
+        if (queryDepth == 0) {
             queryStartedNanos = System.nanoTime();
         }
+        queryDepth++;
     }
 
-    boolean exitQuery() {
-        if (queryDepth == 0 || --queryDepth > 0) {
+    boolean leaveOutermostQuery() {
+        if (queryDepth == 0) {
+            return false;
+        }
+        queryDepth--;
+        if (queryDepth > 0) {
             return false;
         }
         queryFinishedNanos = System.nanoTime();

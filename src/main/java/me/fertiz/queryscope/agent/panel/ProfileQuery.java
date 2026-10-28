@@ -1,9 +1,9 @@
 package me.fertiz.queryscope.agent.panel;
 
-import me.fertiz.queryscope.agent.data.RequestReport;
-import me.fertiz.queryscope.agent.data.RequestTrace;
-import me.fertiz.queryscope.agent.profile.Profile;
-import me.fertiz.queryscope.agent.profile.SampleStore;
+import me.fertiz.queryscope.agent.findings.RequestReport;
+import me.fertiz.queryscope.agent.profiler.Profile;
+import me.fertiz.queryscope.agent.profiler.SampleStore;
+import me.fertiz.queryscope.agent.trace.RequestTrace;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -21,30 +21,38 @@ final class ProfileQuery {
 
     static Optional<Profile.Filter> parse(String rawQuery, ReportStore reports, SampleStore samples) {
         Map<String, String> parameters = parameters(rawQuery);
-        long thread = parameters.containsKey("thread") && !parameters.get("thread").equals("all")
-                ? number(parameters, "thread")
-                : Profile.Filter.ALL_THREADS;
+        long thread = parameters.getOrDefault("thread", "all").equals("all")
+                ? Profile.Filter.ALL_THREADS
+                : number(parameters, "thread");
         boolean appOnly = choice(parameters, "frames", "all", "app").equals("app");
         boolean includeNative = choice(parameters, "samples", "cpu", "all").equals("all");
         if (!parameters.containsKey("request")) {
-            long maxSeconds = Math.max(1, samples.maxAgeMillis() / 1000);
-            long seconds = parameters.containsKey("window") ? number(parameters, "window") : DEFAULT_WINDOW_SECONDS;
-            long now = samples.now();
-            return Optional.of(new Profile.Filter(now - Math.min(seconds, maxSeconds) * 1000, now, thread, appOnly,
-                    includeNative, List.of()));
+            return Optional.of(recentFilter(parameters, samples, thread, appOnly, includeNative));
         }
-        Optional<RequestReport> report = reports.find(number(parameters, "request"));
-        if (report.isEmpty()) {
-            return Optional.empty();
-        }
-        boolean endpoint = choice(parameters, "scope", "request", "endpoint").equals("endpoint");
-        String name = report.get().trace().endpoint();
-        List<RequestTrace> traces = endpoint
+        return reports.find(number(parameters, "request"))
+                .map(report -> requestFilter(parameters, report, reports, samples, thread, appOnly, includeNative));
+    }
+
+    private static Profile.Filter recentFilter(Map<String, String> parameters, SampleStore samples, long thread,
+                                               boolean appOnly, boolean includeNative) {
+        long maxSeconds = Math.max(1, samples.maxAgeMillis() / 1000);
+        long seconds = parameters.containsKey("window") ? number(parameters, "window") : DEFAULT_WINDOW_SECONDS;
+        long now = samples.now();
+        return new Profile.Filter(now - Math.min(seconds, maxSeconds) * 1000, now, thread, appOnly, includeNative,
+                List.of());
+    }
+
+    private static Profile.Filter requestFilter(Map<String, String> parameters, RequestReport report,
+                                                ReportStore reports, SampleStore samples, long thread,
+                                                boolean appOnly, boolean includeNative) {
+        boolean wholeEndpoint = choice(parameters, "scope", "request", "endpoint").equals("endpoint");
+        String endpoint = report.trace().endpoint();
+        List<RequestTrace> traces = wholeEndpoint
                 ? reports.newestFirst().stream()
                         .map(RequestReport::trace)
-                        .filter(trace -> trace.endpoint().equals(name))
+                        .filter(trace -> trace.endpoint().equals(endpoint))
                         .toList()
-                : List.of(report.get().trace());
+                : List.of(report.trace());
         long slack = samples.intervalMillis();
         List<Profile.Window> windows = traces.stream()
                 .map(trace -> new Profile.Window(trace.threadId(), trace.startedAt().toEpochMilli(),
@@ -52,7 +60,7 @@ final class ProfileQuery {
                 .toList();
         long from = windows.stream().mapToLong(Profile.Window::fromMillis).min().orElse(0);
         long to = windows.stream().mapToLong(Profile.Window::toMillis).max().orElse(0);
-        return Optional.of(new Profile.Filter(from, to, thread, appOnly, includeNative, windows));
+        return new Profile.Filter(from, to, thread, appOnly, includeNative, windows);
     }
 
     private static Map<String, String> parameters(String rawQuery) {

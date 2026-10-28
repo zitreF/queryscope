@@ -24,8 +24,7 @@ public record LaunchCommand(List<String> agentOptions, List<String> target, List
     public static LaunchCommand parse(String... arguments) {
         List<String> agentOptions = new ArrayList<>();
         int index = 0;
-        while (index < arguments.length && arguments[index].startsWith("--")
-                && !CLASSPATH_FLAGS.contains(arguments[index])) {
+        while (index < arguments.length && isAgentOption(arguments[index])) {
             agentOptions.add(agentOption(arguments[index]));
             index++;
         }
@@ -45,6 +44,8 @@ public record LaunchCommand(List<String> agentOptions, List<String> target, List
             }
             target = List.of("-jar", arguments[index + 1]);
             index += 2;
+        } else if (arguments[index].startsWith("-")) {
+            throw new IllegalArgumentException(arguments[index] + " is a JVM option, put it before -jar queryscope.jar");
         } else {
             target = List.of("-jar", arguments[index]);
             index++;
@@ -76,6 +77,10 @@ public record LaunchCommand(List<String> agentOptions, List<String> target, List
         command.addAll(target);
         command.addAll(applicationArguments);
         return command;
+    }
+
+    private static boolean isAgentOption(String argument) {
+        return argument.startsWith("--") && !CLASSPATH_FLAGS.contains(argument);
     }
 
     private static String agentOption(String argument) {

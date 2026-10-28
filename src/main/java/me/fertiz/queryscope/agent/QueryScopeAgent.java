@@ -1,18 +1,19 @@
 package me.fertiz.queryscope.agent;
 
-import me.fertiz.queryscope.agent.analysis.QueryAnalyzer;
-import me.fertiz.queryscope.agent.data.RequestReport;
-import me.fertiz.queryscope.agent.instrument.AgentInstaller;
+import me.fertiz.queryscope.agent.calltree.AppPackages;
+import me.fertiz.queryscope.agent.console.ConsoleReporter;
+import me.fertiz.queryscope.agent.console.SessionSummary;
+import me.fertiz.queryscope.agent.findings.QueryAnalyzer;
+import me.fertiz.queryscope.agent.findings.RequestReport;
+import me.fertiz.queryscope.agent.http.Browser;
+import me.fertiz.queryscope.agent.http.LocalServer;
 import me.fertiz.queryscope.agent.launch.LaunchCommand;
-import me.fertiz.queryscope.agent.panel.Browser;
 import me.fertiz.queryscope.agent.panel.PanelServer;
 import me.fertiz.queryscope.agent.panel.ReportStore;
-import me.fertiz.queryscope.agent.profile.Profile;
-import me.fertiz.queryscope.agent.profile.SampleStore;
-import me.fertiz.queryscope.agent.profile.Sampling;
-import me.fertiz.queryscope.agent.report.ConsoleReporter;
-import me.fertiz.queryscope.agent.report.SessionSummary;
-import me.fertiz.queryscope.agent.trace.AppPackages;
+import me.fertiz.queryscope.agent.profiler.Profile;
+import me.fertiz.queryscope.agent.profiler.SampleStore;
+import me.fertiz.queryscope.agent.profiler.Sampling;
+import me.fertiz.queryscope.agent.trace.RequestTrace;
 import me.fertiz.queryscope.agent.trace.RequestTracer;
 
 import java.io.IOException;
@@ -25,6 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class QueryScopeAgent {
 
     public static final String PANEL_PORT_PROPERTY = "queryscope.panelPort";
+    public static final String PACKAGE = QueryScopeAgent.class.getPackageName() + ".";
 
     private static final System.Logger LOGGER = System.getLogger("QueryScope");
     private static final int STORED_REQUESTS = 200;
@@ -52,23 +54,16 @@ public final class QueryScopeAgent {
         ConsoleReporter console = new ConsoleReporter();
         ReportStore store = new ReportStore(STORED_REQUESTS);
         SessionSummary summary = new SessionSummary(Clock.systemUTC());
-        RequestTracer.publishTo(trace -> {
-            if (trace.queries().isEmpty() && trace.callTree().calls().isEmpty()) {
-                return;
-            }
-            RequestReport report = analyzer.analyze(trace);
-            if (!trace.queries().isEmpty() || !report.findings().isEmpty()) {
-                console.accept(report);
-            }
-            store.add(report);
-            summary.accept(report);
-        });
+        RequestTracer.publishTo(trace -> publish(trace, analyzer, console, store, summary));
         AppPackages application = config.packages().isEmpty() ? AppPackages.detect() : AppPackages.of(config.packages());
-        AppPackages profiled = profiledPackages(config, application);
-        AgentInstaller.install(instrumentation, config.entryMethods(), profiled);
+        AppPackages callTreePackages = config.callTree() ? application : AppPackages.of(List.of());
+        if (config.callTree()) {
+            logCallTree(application);
+        }
+        AgentInstaller.install(instrumentation, config.entryMethods(), callTreePackages);
         SampleStore samples = new SampleStore(Clock.systemUTC(), STORED_SAMPLES, SAMPLE_AGE);
         Sampling sampling = config.sampling() ? Sampling.start(samples, config.sampleInterval()) : null;
-        startPanel(config, store, profiled, application, samples);
+        startPanel(config, store, callTreePackages, application, samples);
         if (config.printSummary()) {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 if (sampling != null) {
@@ -80,6 +75,27 @@ public final class QueryScopeAgent {
         exitWithLauncher();
     }
 
+    private static void publish(RequestTrace trace, QueryAnalyzer analyzer, ConsoleReporter console, ReportStore store,
+                                SessionSummary summary) {
+        boolean ranSql = !trace.queries().isEmpty();
+        if (!ranSql && trace.callTree().calls().isEmpty()) {
+            return;
+        }
+        RequestReport report = analyzer.analyze(trace);
+        if (ranSql || !report.findings().isEmpty()) {
+            console.log(report);
+        }
+        store.add(report);
+        summary.accept(report);
+    }
+
+    private static void logCallTree(AppPackages application) {
+        LOGGER.log(System.Logger.Level.INFO, application.isEmpty()
+                ? "QueryScope could not tell the application's package, so the call tree is off."
+                + " Pass package=com.acme to turn it on."
+                : "QueryScope records the call tree of " + String.join(", ", application.names()));
+    }
+
     private static void exitWithLauncher() {
         String launcherPid = System.getProperty(LaunchCommand.LAUNCHER_PID_PROPERTY);
         if (launcherPid != null) {
@@ -88,21 +104,10 @@ public final class QueryScopeAgent {
         }
     }
 
-    private static AppPackages profiledPackages(AgentConfig config, AppPackages application) {
-        if (!config.profile()) {
-            return AppPackages.of(List.of());
-        }
-        LOGGER.log(System.Logger.Level.INFO, application.isEmpty()
-                ? "QueryScope could not tell the application's package, so the call tree is off."
-                + " Pass package=com.acme to turn it on."
-                : "QueryScope records the call tree of " + String.join(", ", application.names()));
-        return application;
-    }
-
-    private static void startPanel(AgentConfig config, ReportStore store, AppPackages profiled, AppPackages application,
-                                   SampleStore samples) {
+    private static void startPanel(AgentConfig config, ReportStore store, AppPackages callTreePackages,
+                                   AppPackages application, SampleStore samples) {
         try {
-            PanelServer panel = PanelServer.start(config.port(), store, profiled.names(), application, samples);
+            LocalServer panel = PanelServer.start(config.port(), store, callTreePackages, application, samples);
             String url = "http://localhost:" + panel.port();
             System.setProperty(PANEL_PORT_PROPERTY, String.valueOf(panel.port()));
             LOGGER.log(System.Logger.Level.INFO, "QueryScope panel is running at " + url);

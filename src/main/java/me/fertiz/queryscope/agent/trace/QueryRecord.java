@@ -1,6 +1,5 @@
 package me.fertiz.queryscope.agent.trace;
 
-import me.fertiz.queryscope.agent.data.QueryExecution;
 
 final class QueryRecord {
 

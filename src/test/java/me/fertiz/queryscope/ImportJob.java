@@ -1,9 +1,9 @@
 package me.fertiz.queryscope;
 
-import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import javax.sql.DataSource;
 
 final class ImportJob {
 

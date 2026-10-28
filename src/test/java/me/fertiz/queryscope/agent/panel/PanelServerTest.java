@@ -1,7 +1,8 @@
 package me.fertiz.queryscope.agent.panel;
 
-import me.fertiz.queryscope.agent.profile.SampleStore;
-import me.fertiz.queryscope.agent.trace.AppPackages;
+import me.fertiz.queryscope.agent.calltree.AppPackages;
+import me.fertiz.queryscope.agent.http.LocalServer;
+import me.fertiz.queryscope.agent.profiler.SampleStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,11 +32,11 @@ class PanelServerTest {
     private final HttpClient client = HttpClient.newHttpClient();
     private final ReportStore store = new ReportStore(10);
     private final SampleStore samples = new SampleStore(Clock.systemUTC(), 100, Duration.ofMinutes(5));
-    private PanelServer panel;
+    private LocalServer panel;
 
     @BeforeEach
     void startPanel() throws IOException {
-        panel = PanelServer.start(0, store, List.of("com.acme"), AppPackages.of(List.of("com.acme")), samples);
+        panel = PanelServer.start(0, store, AppPackages.of(List.of("com.acme")), AppPackages.of(List.of("com.acme")), samples);
     }
 
     @AfterEach
@@ -110,7 +111,7 @@ class PanelServerTest {
             assertEquals("", lines.next());
             store.add(Reports.plain(3, "/live"));
             assertEquals("event: request", lines.next());
-            assertEquals("data: " + ReportJson.of(Reports.plain(3, "/live")), lines.next());
+            assertEquals("data: " + ReportJson.event(Reports.plain(3, "/live")), lines.next());
         });
         assertEquals("text/event-stream; charset=utf-8", events.headers().firstValue("Content-Type").orElseThrow());
     }

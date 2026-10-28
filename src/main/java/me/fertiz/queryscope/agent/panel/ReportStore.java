@@ -1,6 +1,6 @@
 package me.fertiz.queryscope.agent.panel;
 
-import me.fertiz.queryscope.agent.data.RequestReport;
+import me.fertiz.queryscope.agent.findings.RequestReport;
 
 import java.util.ArrayDeque;
 import java.util.Comparator;
@@ -34,13 +34,13 @@ public final class ReportStore {
     }
 
     public synchronized List<RequestReport> newestFirst() {
-        return Stream.concat(withSql.stream(), withoutSql.stream())
+        return all()
                 .sorted(Comparator.comparingLong((RequestReport report) -> report.trace().id()).reversed())
                 .toList();
     }
 
     public synchronized Optional<RequestReport> find(long id) {
-        return Stream.concat(withSql.stream(), withoutSql.stream())
+        return all()
                 .filter(report -> report.trace().id() == id)
                 .findFirst();
     }
@@ -53,5 +53,9 @@ public final class ReportStore {
     public Runnable subscribe(Consumer<RequestReport> subscriber) {
         subscribers.add(subscriber);
         return () -> subscribers.remove(subscriber);
+    }
+
+    private Stream<RequestReport> all() {
+        return Stream.concat(withSql.stream(), withoutSql.stream());
     }
 }

@@ -1,6 +1,6 @@
 package me.fertiz.queryscope.agent.panel;
 
-import me.fertiz.queryscope.agent.data.RequestReport;
+import me.fertiz.queryscope.agent.findings.RequestReport;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

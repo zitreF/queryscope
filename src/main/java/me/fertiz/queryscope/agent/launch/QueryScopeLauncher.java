@@ -1,6 +1,7 @@
 package me.fertiz.queryscope.agent.launch;
 
 import me.fertiz.queryscope.agent.AgentConfig;
+import me.fertiz.queryscope.agent.hub.HubCommand;
 
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
@@ -9,6 +10,7 @@ import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 public final class QueryScopeLauncher {
 
@@ -43,37 +45,38 @@ public final class QueryScopeLauncher {
               --entry=com.acme.Job#run    method whose call becomes one task, can be repeated
 
             JVM options of this java command, such as -Xmx1g or -Dspring.profiles.active=local, are
-            passed on to the application.
+            passed on to the application, except other agents and debuggers.
             """;
+    private static final String HELP = "help=true";
 
     private QueryScopeLauncher() {
     }
 
     public static void main(String[] arguments) throws Exception {
-        if (List.of(arguments).contains("--help")) {
+        LaunchCommand command = orUsage(() -> LaunchCommand.parse(arguments));
+        if (command.agentOptions().contains(HELP)) {
             System.out.print(USAGE);
-            return;
+        } else if (command.target().isEmpty()) {
+            runHub(orUsage(() -> HubCommand.parse(command.agentOptions())));
+        } else {
+            orUsage(() -> AgentConfig.parse(command.agentOptionString()));
+            runApplication(command);
         }
-        LaunchCommand command;
-        HubCommand hub = null;
+    }
+
+    private static <T> T orUsage(Supplier<T> parse) {
         try {
-            command = LaunchCommand.parse(arguments);
-            if (command.target().isEmpty()) {
-                hub = HubCommand.parse(command.agentOptions());
-            } else {
-                AgentConfig.parse(command.agentOptionString());
-            }
+            return parse.get();
         } catch (IllegalArgumentException e) {
             System.err.println(e.getMessage());
             System.err.println();
             System.err.print(USAGE);
             System.exit(USAGE_ERROR);
-            return;
+            return null;
         }
-        if (hub != null) {
-            runHub(hub);
-            return;
-        }
+    }
+
+    private static void runApplication(LaunchCommand command) throws Exception {
         Process application = new ProcessBuilder(command.processCommand(
                 javaExecutable(), agentJar(), jvmOptions(), ProcessHandle.current().pid()))
                 .inheritIO()

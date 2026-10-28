@@ -1,14 +1,15 @@
 package me.fertiz.queryscope.agent.panel;
 
-import me.fertiz.queryscope.agent.profile.Profile;
-import me.fertiz.queryscope.agent.profile.SampleStore;
+import me.fertiz.queryscope.agent.http.JsonWriter;
+import me.fertiz.queryscope.agent.profiler.Profile;
+import me.fertiz.queryscope.agent.profiler.SampleStore;
 
 import java.util.List;
 
 final class ProfileJson {
 
     private static final int MAX_DEPTH = 400;
-    private static final int SHOWN_FRACTION = 1000;
+    private static final int HIDDEN_BELOW_ONE_SAMPLE_IN = 1000;
 
     private ProfileJson() {
     }
@@ -39,7 +40,7 @@ final class ProfileJson {
                 .name("own").value(method.own())
                 .endObject());
         json.endArray().name("root");
-        write(json, profile.root(), Math.max(1, profile.samples() / SHOWN_FRACTION), 0);
+        write(json, profile.root(), Math.max(1, profile.samples() / HIDDEN_BELOW_ONE_SAMPLE_IN), 0);
         return json.endObject().toString();
     }
 

@@ -73,7 +73,7 @@ system property `queryscope.panelPort`. The hub reads that property through the 
 the agent, so attaching twice, or attaching to an application that was started with `-javaagent`, finds the existing
 panel instead of loading a second agent.
 
-**The hub** (`HubCommand`, `HubServer`, `LocalProcesses`, `Attacher`) is what `java -jar queryscope.jar` starts without
+**The hub** (`HubCommand`, `HubServer`, `LocalProcesses`) is what `java -jar queryscope.jar` starts without
 an application. It lists the JVMs of the current user with `VirtualMachine.list()`, picks a free port for every agent
 it loads, and passes its own command line options on to them. `--attach=<pid>` does one attach from the command line.
 
@@ -280,18 +280,19 @@ GitHub Actions runs the same build on Temurin 25 for every push and pull request
 ## Code layout
 
 ```
-me.fertiz.queryscope.agent             QueryScopeAgent (premain, agentmain), AgentConfig
-├── instrument                         AgentInstaller and the advice classes, Servlets
-├── trace                              RequestTracer, ActiveRequest, CallTracer, CallTreeBuilder,
-│                                      CallSites, AppPackages, StatementState, ParameterValues, WeakIdentityMap
-├── analysis                           SqlNormalizer, QueryAnalyzer, Thresholds
-├── data                               immutable records: RequestTrace, QueryExecution, CallTree, findings
-├── profile                            Sampling, JfrSampler, ThreadDumpSampler, SampleStore, Profile
-├── report                             ConsoleReporter, SessionSummary, FindingText
-├── panel                              PanelServer, HubServer, ReportStore, JSON writers, the web assets
-├── attach                             Attacher, LocalProcesses, JavaProcess
-└── launch                             QueryScopeLauncher, LaunchCommand, HubCommand
+me.fertiz.queryscope.agent             QueryScopeAgent (premain, agentmain), AgentConfig, AgentInstaller
+├── trace                              requests and tasks with their SQL: RequestTracer, ActiveRequest,
+│                                      Servlets, the JDBC, servlet and entry advice, RequestTrace, QueryExecution
+├── calltree                           the call tree of your methods: CallTracer, CallTreeBuilder, MethodAdvice,
+│                                      CallSites, AppPackages, CallTree, CallNode
+├── findings                           QueryAnalyzer, SqlNormalizer, Thresholds and the finding records
+├── profiler                           Sampling, JfrSampler, ThreadDumpSampler, SampleStore, Profile
+├── console                            ConsoleReporter, SessionSummary, FindingText
+├── panel                              PanelServer, ReportStore, ReportJson, ProfileJson, ProfileQuery
+├── hub                                HubCommand, HubServer, LocalProcesses, JavaProcess
+├── http                               LocalServer, HttpSupport, JsonWriter, Browser, shared by panel and hub
+└── launch                             QueryScopeLauncher, LaunchCommand
 ```
 
-The tests mirror the packages, and `src/test` also holds the demo shop (`demo`), a plain JDBC program (`plain`), a
+The web pages live in `src/main/resources/me/fertiz/queryscope/agent/web`. The tests mirror the packages, and `src/test` also holds the demo shop (`demo`), a plain JDBC program (`plain`), a
 profiled fixture (`profiled`) and the end-to-end tests (`e2e`).

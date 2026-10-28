@@ -1,19 +1,19 @@
 package me.fertiz.queryscope.agent.panel;
 
-import me.fertiz.queryscope.agent.analysis.SqlNormalizer;
-import me.fertiz.queryscope.agent.data.CallNode;
-import me.fertiz.queryscope.agent.data.CallTree;
-import me.fertiz.queryscope.agent.data.DuplicateQuery;
-import me.fertiz.queryscope.agent.data.Finding;
-import me.fertiz.queryscope.agent.data.LargeResult;
-import me.fertiz.queryscope.agent.data.NPlusOne;
-import me.fertiz.queryscope.agent.data.QueryExecution;
-import me.fertiz.queryscope.agent.data.RepeatedWrite;
-import me.fertiz.queryscope.agent.data.RequestReport;
-import me.fertiz.queryscope.agent.data.RequestTrace;
-import me.fertiz.queryscope.agent.data.SlowMethod;
-import me.fertiz.queryscope.agent.data.SlowQuery;
-import me.fertiz.queryscope.agent.data.TooManyQueries;
+import me.fertiz.queryscope.agent.calltree.CallNode;
+import me.fertiz.queryscope.agent.calltree.CallTree;
+import me.fertiz.queryscope.agent.findings.DuplicateQuery;
+import me.fertiz.queryscope.agent.findings.Finding;
+import me.fertiz.queryscope.agent.findings.LargeResult;
+import me.fertiz.queryscope.agent.findings.NPlusOne;
+import me.fertiz.queryscope.agent.findings.RepeatedWrite;
+import me.fertiz.queryscope.agent.findings.RequestReport;
+import me.fertiz.queryscope.agent.findings.SlowMethod;
+import me.fertiz.queryscope.agent.findings.SlowQuery;
+import me.fertiz.queryscope.agent.findings.TooManyQueries;
+import me.fertiz.queryscope.agent.http.JsonWriter;
+import me.fertiz.queryscope.agent.trace.QueryExecution;
+import me.fertiz.queryscope.agent.trace.RequestTrace;
 
 import java.util.List;
 import java.util.Locale;
@@ -23,19 +23,19 @@ final class ReportJson {
     private ReportJson() {
     }
 
-    static String of(List<RequestReport> reports) {
+    static String list(List<RequestReport> reports) {
         JsonWriter json = new JsonWriter().beginArray();
         reports.forEach(report -> write(json, report));
         return json.endArray().toString();
     }
 
-    static String of(RequestReport report) {
+    static String event(RequestReport report) {
         JsonWriter json = new JsonWriter();
         write(json, report);
         return json.toString();
     }
 
-    static String ofCalls(RequestReport report, List<String> packages) {
+    static String calls(RequestReport report, List<String> packages) {
         CallTree tree = report.trace().callTree();
         JsonWriter json = new JsonWriter().beginObject()
                 .name("id").value(report.trace().id())
@@ -98,21 +98,17 @@ final class ReportJson {
                     write.queryIndexes(), write.totalNanos());
         } else if (finding instanceof DuplicateQuery duplicate) {
             json.name("type").value("duplicateQuery")
-                    .name("sql").value(SqlNormalizer.normalize(duplicate.sql()))
+                    .name("sql").value(duplicate.normalizedSql())
                     .name("parameters").value(duplicate.parameters())
                     .name("callSite").value(duplicate.callSite())
                     .name("executions").value(duplicate.executions());
             indexes(json, "queryIndexes", duplicate.queryIndexes());
         } else if (finding instanceof SlowQuery slow) {
-            json.name("type").value("slowQuery")
-                    .name("sql").value(SqlNormalizer.normalize(slow.query().sql()))
-                    .name("callSite").value(slow.query().callSite())
+            queryFinding(json, "slowQuery", slow.normalizedSql(), slow.query())
                     .name("durationMs").value(millis(slow.query().durationNanos()))
                     .name("queryIndex").value(slow.queryIndex());
         } else if (finding instanceof LargeResult large) {
-            json.name("type").value("largeResult")
-                    .name("sql").value(SqlNormalizer.normalize(large.query().sql()))
-                    .name("callSite").value(large.query().callSite())
+            queryFinding(json, "largeResult", large.normalizedSql(), large.query())
                     .name("rows").value(large.query().rows())
                     .name("queryIndex").value(large.queryIndex());
         } else if (finding instanceof TooManyQueries tooMany) {
@@ -121,12 +117,12 @@ final class ReportJson {
                     .name("limit").value(tooMany.limit())
                     .name("databaseMs").value(millis(tooMany.databaseNanos()))
                     .name("durationMs").value(millis(tooMany.durationNanos()));
-        } else if (finding instanceof SlowMethod slow) {
+        } else if (finding instanceof SlowMethod method) {
             json.name("type").value("slowMethod")
-                    .name("method").value(slow.method())
-                    .name("calls").value(slow.calls())
-                    .name("ownMs").value(millis(slow.ownNanos()))
-                    .name("durationMs").value(millis(slow.durationNanos()));
+                    .name("method").value(method.method())
+                    .name("calls").value(method.calls())
+                    .name("ownMs").value(millis(method.ownNanos()))
+                    .name("durationMs").value(millis(method.durationNanos()));
         }
         json.endObject();
     }
@@ -142,6 +138,12 @@ final class ReportJson {
         json.name("children").beginArray();
         node.children().forEach(child -> write(json, child));
         json.endArray().endObject();
+    }
+
+    private static JsonWriter queryFinding(JsonWriter json, String type, String sql, QueryExecution query) {
+        return json.name("type").value(type)
+                .name("sql").value(sql)
+                .name("callSite").value(query.callSite());
     }
 
     private static void repeatedStatement(JsonWriter json, String type, String sql, String callSite,

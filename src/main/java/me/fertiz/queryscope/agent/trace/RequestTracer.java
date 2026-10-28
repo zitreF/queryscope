@@ -1,9 +1,10 @@
 package me.fertiz.queryscope.agent.trace;
 
-import me.fertiz.queryscope.agent.data.RequestTrace;
+import me.fertiz.queryscope.agent.calltree.CallSites;
+import me.fertiz.queryscope.agent.calltree.CallTracer;
+
 
 import java.sql.ResultSet;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -14,8 +15,6 @@ public final class RequestTracer {
     private static final AtomicLong IDS = new AtomicLong();
     private static final WeakIdentityMap<StatementState> STATEMENTS = new WeakIdentityMap<>();
     private static final WeakIdentityMap<QueryRecord> RESULTS = new WeakIdentityMap<>();
-    private static final long BACKGROUND_IDLE_NANOS = TimeUnit.SECONDS.toNanos(1);
-    private static final int BACKGROUND_MAX_QUERIES = 1000;
     private static final int NO_STATUS = 0;
 
     private static volatile Consumer<RequestTrace> listener = trace -> {
@@ -34,9 +33,10 @@ public final class RequestTracer {
     }
 
     public static boolean requestStarted(String method, String uri, String queryString) {
-        if (!makeRoomForForegroundUnit()) {
+        if (inForegroundUnit()) {
             return false;
         }
+        finishCurrent(NO_STATUS);
         String path = queryString == null ? uri : uri + "?" + queryString;
         CURRENT.set(ActiveRequest.http(IDS.incrementAndGet(), method, path));
         return true;
@@ -47,9 +47,10 @@ public final class RequestTracer {
     }
 
     public static boolean taskStarted(String qualifiedName) {
-        if (!makeRoomForForegroundUnit()) {
+        if (inForegroundUnit()) {
             return false;
         }
+        finishCurrent(NO_STATUS);
         CURRENT.set(ActiveRequest.entry(IDS.incrementAndGet(), CallSites.shortName(qualifiedName)));
         return true;
     }
@@ -87,8 +88,7 @@ public final class RequestTracer {
 
     public static void queryStarted() {
         ActiveRequest current = CURRENT.get();
-        if (current != null && current.isBackground()
-                && current.isIdleSince(System.nanoTime(), BACKGROUND_IDLE_NANOS, BACKGROUND_MAX_QUERIES)) {
+        if (current != null && current.isBackground() && current.isExpired(System.nanoTime())) {
             finishCurrent(NO_STATUS);
             current = null;
         }
@@ -101,17 +101,17 @@ public final class RequestTracer {
 
     public static void queryFinished(String sql, boolean failed, Object result) {
         ActiveRequest request = CURRENT.get();
-        if (request != null && request.exitQuery() && sql != null) {
-            watchRows(request.addQuery(sql, "", failed, CallSites.current()), result);
+        if (request != null && request.leaveOutermostQuery() && sql != null) {
+            watchRows(request.addQuery(sql, "", failed, CallSites.callSite()), result);
         }
     }
 
     public static void preparedQueryFinished(Object statement, boolean failed, Object result) {
         ActiveRequest request = CURRENT.get();
-        if (request != null && request.exitQuery()) {
+        if (request != null && request.leaveOutermostQuery()) {
             StatementState state = STATEMENTS.get(statement);
             if (state != null) {
-                watchRows(request.addQuery(state.sql(), state.parameters(), failed, CallSites.current()), result);
+                watchRows(request.addQuery(state.sql(), state.parameters(), failed, CallSites.callSite()), result);
             }
         }
     }
@@ -132,18 +132,6 @@ public final class RequestTracer {
             query.resultOpened();
             RESULTS.put(result, query);
         }
-    }
-
-    private static boolean makeRoomForForegroundUnit() {
-        ActiveRequest current = CURRENT.get();
-        if (current == null) {
-            return true;
-        }
-        if (!current.isBackground()) {
-            return false;
-        }
-        finishCurrent(NO_STATUS);
-        return true;
     }
 
     private static void finishCurrent(int status) {
