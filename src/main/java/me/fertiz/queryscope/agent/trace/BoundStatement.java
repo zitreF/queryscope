@@ -3,12 +3,12 @@ package me.fertiz.queryscope.agent.trace;
 import java.util.Map;
 import java.util.TreeMap;
 
-final class StatementState {
+final class BoundStatement {
 
     private final String sql;
     private final Map<Integer, String> parameters = new TreeMap<>();
 
-    StatementState(String sql) {
+    BoundStatement(String sql) {
         this.sql = sql;
     }
 
@@ -16,7 +16,7 @@ final class StatementState {
         return sql;
     }
 
-    synchronized void set(int index, String value) {
+    synchronized void bind(int index, String value) {
         parameters.put(index, value);
     }
 
@@ -24,7 +24,7 @@ final class StatementState {
         parameters.clear();
     }
 
-    synchronized String parameters() {
+    synchronized String parametersText() {
         return parameters.isEmpty() ? "" : parameters.values().toString();
     }
 }

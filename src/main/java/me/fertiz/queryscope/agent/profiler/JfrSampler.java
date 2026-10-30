@@ -31,11 +31,11 @@ final class JfrSampler {
         RecordingStream stream = new RecordingStream();
         stream.enable(EXECUTION_SAMPLE).withPeriod(interval);
         stream.enable(NATIVE_SAMPLE).withPeriod(interval);
-        stream.onEvent(EXECUTION_SAMPLE, event -> record(store, event, true));
-        stream.onEvent(NATIVE_SAMPLE, event -> record(store, event, false));
+        stream.onEvent(EXECUTION_SAMPLE, event -> storeSample(store, event, true));
+        stream.onEvent(NATIVE_SAMPLE, event -> storeSample(store, event, false));
         AtomicBoolean stopping = new AtomicBoolean();
         Thread consumer = new Thread(() -> consume(stream::start, stopping, fallback),
-                Sampling.OWN_THREADS + "flight-recorder");
+                Sampling.THREAD_NAME_PREFIX + "flight-recorder");
         consumer.setDaemon(true);
         consumer.start();
         return () -> {
@@ -64,7 +64,7 @@ final class JfrSampler {
         }
     }
 
-    private static void record(SampleStore store, RecordedEvent event, boolean onCpu) {
+    private static void storeSample(SampleStore store, RecordedEvent event, boolean onCpu) {
         RecordedStackTrace stack = event.getStackTrace();
         RecordedThread thread = event.getThread("sampledThread");
         if (stack == null || thread == null || thread.getJavaThreadId() <= 0) {
@@ -80,7 +80,7 @@ final class JfrSampler {
             RecordedFrame frame = frames.get(index);
             if (frame.isJavaFrame()) {
                 RecordedMethod method = frame.getMethod();
-                methods.add(Sampling.methodName(method.getType().getName(), method.getName()));
+                methods.add(Sampling.qualifiedMethod(method.getType().getName(), method.getName()));
             }
         }
         store.add(event.getStartTime().toEpochMilli(), thread.getJavaThreadId(), name, onCpu, stack.isTruncated(),

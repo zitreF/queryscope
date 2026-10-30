@@ -1,6 +1,7 @@
 package me.fertiz.queryscope.agent;
 
-import me.fertiz.queryscope.agent.calltree.AppPackages;
+import me.fertiz.queryscope.agent.appcode.AppPackages;
+import me.fertiz.queryscope.agent.appcode.CallSites;
 import me.fertiz.queryscope.agent.calltree.CallTracer;
 import me.fertiz.queryscope.agent.calltree.MethodAdvice;
 import me.fertiz.queryscope.agent.trace.ClearParametersAdvice;
@@ -63,7 +64,7 @@ public final class AgentInstaller {
                 .disableClassFormatChanges()
                 .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
                 .with(new ErrorLogger())
-                .ignore(nameStartsWith(QueryScopeAgent.PACKAGE)
+                .ignore(nameStartsWith(CallSites.AGENT_PACKAGE_PREFIX)
                         .or(nameStartsWith("net.bytebuddy."))
                         .or(nameStartsWith("java."))
                         .or(nameStartsWith("jdk."))
@@ -74,7 +75,7 @@ public final class AgentInstaller {
         hooks.addAll(jdbcHooks());
         hooks.addAll(entryHooks(entryMethods));
         if (!callTreePackages.isEmpty()) {
-            hooks.add(methodHook(callTreePackages));
+            hooks.add(callTreeHook(callTreePackages));
         }
         for (Hook hook : hooks) {
             builder = builder.type(hook.types()).transform(new AgentBuilder.Transformer.ForAdvice()
@@ -86,38 +87,38 @@ public final class AgentInstaller {
 
     private static List<Hook> servletHooks() {
         return List.of(
-                new Hook(implementing(namedOneOf(Servlets.typeNames("FilterChain"))),
+                new Hook(concreteTypesImplementing(namedOneOf(Servlets.inBothServletNamespaces("FilterChain"))),
                         named("doFilter").and(takesArguments(2)),
                         ServletAdvice.class),
-                new Hook(namedOneOf(Servlets.typeNames("http.HttpServlet")),
+                new Hook(namedOneOf(Servlets.inBothServletNamespaces("http.HttpServlet")),
                         named("service").and(takesArguments(2))
-                                .and(takesArgument(0, namedOneOf(Servlets.typeNames("ServletRequest")))),
+                                .and(takesArgument(0, namedOneOf(Servlets.inBothServletNamespaces("ServletRequest")))),
                         ServletAdvice.class));
     }
 
     private static List<Hook> jdbcHooks() {
         return List.of(
-                new Hook(implementing(is(Connection.class)),
+                new Hook(concreteTypesImplementing(is(Connection.class)),
                         namedOneOf("prepareStatement", "prepareCall").and(takesArgument(0, String.class)),
                         PrepareStatementAdvice.class),
-                new Hook(implementing(is(Connection.class)),
+                new Hook(concreteTypesImplementing(is(Connection.class)),
                         namedOneOf(RELEASE_METHODS).and(takesArguments(0)),
                         ConnectionReleaseAdvice.class),
-                new Hook(implementing(is(Statement.class)),
+                new Hook(concreteTypesImplementing(is(Statement.class)),
                         namedOneOf(EXECUTE_METHODS).and(takesArgument(0, String.class)),
                         ExecuteSqlAdvice.class),
-                new Hook(implementing(is(Statement.class)),
+                new Hook(concreteTypesImplementing(is(Statement.class)),
                         namedOneOf(EXECUTE_METHODS).or(namedOneOf(BATCH_METHODS)).and(takesArguments(0)),
                         ExecutePreparedAdvice.class),
-                new Hook(implementing(is(PreparedStatement.class)),
+                new Hook(concreteTypesImplementing(is(PreparedStatement.class)),
                         nameStartsWith("set").and(takesArgument(0, int.class))
                                 .and(takesArguments(2).or(takesArguments(3)))
                                 .and(isOverriddenFrom(PreparedStatement.class)),
                         ParameterAdvice.class),
-                new Hook(implementing(is(PreparedStatement.class)),
+                new Hook(concreteTypesImplementing(is(PreparedStatement.class)),
                         named("clearParameters").and(takesArguments(0)),
                         ClearParametersAdvice.class),
-                new Hook(implementing(is(ResultSet.class)),
+                new Hook(concreteTypesImplementing(is(ResultSet.class)),
                         named("next").and(takesArguments(0)),
                         RowAdvice.class));
     }
@@ -129,14 +130,15 @@ public final class AgentInstaller {
                 .toList();
     }
 
-    private static Hook methodHook(AppPackages callTreePackages) {
-        ElementMatcher<TypeDescription> application = type -> callTreePackages.covers(type.getName());
+    private static Hook callTreeHook(AppPackages callTreePackages) {
+        ElementMatcher<TypeDescription> application = type -> callTreePackages.includesClass(type.getName());
         return new Hook(not(isInterface()).and(application),
                 isMethod().and(not(isNative())).and(not(isSynthetic())).and(not(isBridge())),
                 MethodAdvice.class);
     }
 
-    private static ElementMatcher.Junction<TypeDescription> implementing(ElementMatcher<? super TypeDescription> api) {
+    private static ElementMatcher.Junction<TypeDescription> concreteTypesImplementing(
+            ElementMatcher<? super TypeDescription> api) {
         return not(isInterface()).and(hasSuperType(api));
     }
 

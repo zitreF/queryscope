@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.regex.Pattern;
 
-public record RequestTrace(
+public record UnitTrace(
         long id,
         UnitKind kind,
         String method,
@@ -28,7 +28,7 @@ public record RequestTrace(
             Pattern.compile("/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?=/|$)");
     private static final Pattern NUMBER_SEGMENT = Pattern.compile("/\\d+(?=/|$)");
 
-    public RequestTrace(long id, UnitKind kind, String method, String path, int status, Instant startedAt,
+    public UnitTrace(long id, UnitKind kind, String method, String path, int status, Instant startedAt,
                         long durationNanos, List<QueryExecution> queries) {
         this(id, kind, method, path, status, startedAt, durationNanos, queries, CallTree.EMPTY, 0, 0, 0, 0);
     }

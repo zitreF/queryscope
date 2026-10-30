@@ -1,6 +1,6 @@
 package me.fertiz.queryscope.agent.panel;
 
-import me.fertiz.queryscope.agent.findings.RequestReport;
+import me.fertiz.queryscope.agent.findings.UnitReport;
 
 import java.util.ArrayDeque;
 import java.util.Comparator;
@@ -14,17 +14,17 @@ import java.util.stream.Stream;
 public final class ReportStore {
 
     private final int capacity;
-    private final Deque<RequestReport> withSql = new ArrayDeque<>();
-    private final Deque<RequestReport> withoutSql = new ArrayDeque<>();
-    private final List<Consumer<RequestReport>> subscribers = new CopyOnWriteArrayList<>();
+    private final Deque<UnitReport> withSql = new ArrayDeque<>();
+    private final Deque<UnitReport> withoutSql = new ArrayDeque<>();
+    private final List<Consumer<UnitReport>> subscribers = new CopyOnWriteArrayList<>();
 
     public ReportStore(int capacity) {
         this.capacity = capacity;
     }
 
-    public void add(RequestReport report) {
+    public void add(UnitReport report) {
         synchronized (this) {
-            Deque<RequestReport> reports = report.trace().queries().isEmpty() ? withoutSql : withSql;
+            Deque<UnitReport> reports = report.trace().queries().isEmpty() ? withoutSql : withSql;
             reports.addFirst(report);
             if (reports.size() > capacity) {
                 reports.removeLast();
@@ -33,13 +33,13 @@ public final class ReportStore {
         subscribers.forEach(subscriber -> subscriber.accept(report));
     }
 
-    public synchronized List<RequestReport> newestFirst() {
+    public synchronized List<UnitReport> newestFirst() {
         return all()
-                .sorted(Comparator.comparingLong((RequestReport report) -> report.trace().id()).reversed())
+                .sorted(Comparator.comparingLong((UnitReport report) -> report.trace().id()).reversed())
                 .toList();
     }
 
-    public synchronized Optional<RequestReport> find(long id) {
+    public synchronized Optional<UnitReport> find(long id) {
         return all()
                 .filter(report -> report.trace().id() == id)
                 .findFirst();
@@ -50,12 +50,12 @@ public final class ReportStore {
         withoutSql.clear();
     }
 
-    public Runnable subscribe(Consumer<RequestReport> subscriber) {
+    public Runnable subscribe(Consumer<UnitReport> subscriber) {
         subscribers.add(subscriber);
         return () -> subscribers.remove(subscriber);
     }
 
-    private Stream<RequestReport> all() {
+    private Stream<UnitReport> all() {
         return Stream.concat(withSql.stream(), withoutSql.stream());
     }
 }

@@ -1,4 +1,4 @@
-package me.fertiz.queryscope.agent.calltree;
+package me.fertiz.queryscope.agent.appcode;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -54,27 +54,27 @@ class AppPackagesTest {
     }
 
     @Test
-    void coversApplicationClassesButNotGeneratedProxies() {
+    void includesApplicationClassesButNotGeneratedProxies() {
         AppPackages packages = AppPackages.of(List.of("com.acme.shop"));
 
-        assertTrue(packages.covers("com.acme.shop.OrderService"));
-        assertTrue(packages.covers("com.acme.shop.order.Order$Line"));
-        assertFalse(packages.covers("com.acme.shopping.Cart"));
-        assertFalse(packages.covers("com.acme.shop.OrderService$$SpringCGLIB$$0"));
-        assertFalse(packages.covers("com.acme.shop.Customer$HibernateProxy$x1y2"));
+        assertTrue(packages.includesClass("com.acme.shop.OrderService"));
+        assertTrue(packages.includesClass("com.acme.shop.order.Order$Line"));
+        assertFalse(packages.includesClass("com.acme.shopping.Cart"));
+        assertFalse(packages.includesClass("com.acme.shop.OrderService$$SpringCGLIB$$0"));
+        assertFalse(packages.includesClass("com.acme.shop.Customer$HibernateProxy$x1y2"));
     }
 
     @Test
-    void coversExplicitPackagesInsideFrameworkNamespaces() {
+    void includesExplicitPackagesInsideFrameworkNamespaces() {
         AppPackages petClinic = AppPackages.of(List.of("org.springframework.samples.petclinic"));
 
-        assertTrue(petClinic.covers("org.springframework.samples.petclinic.owner.OwnerController"));
-        assertFalse(petClinic.covers("org.springframework.web.servlet.DispatcherServlet"));
+        assertTrue(petClinic.includesClass("org.springframework.samples.petclinic.owner.OwnerController"));
+        assertFalse(petClinic.includesClass("org.springframework.web.servlet.DispatcherServlet"));
     }
 
     @Test
-    void neverCoversQueryScopeItself() {
-        assertFalse(AppPackages.of(List.of("me.fertiz")).covers("me.fertiz.queryscope.agent.trace.RequestTracer"));
+    void neverIncludesQueryScopeItself() {
+        assertFalse(AppPackages.of(List.of("me.fertiz")).includesClass("me.fertiz.queryscope.agent.trace.UnitTracer"));
     }
 
     private static Path jar(Path path, String mainClass, String startClass) throws IOException {

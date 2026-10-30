@@ -1,4 +1,4 @@
-package me.fertiz.queryscope.agent.launch;
+package me.fertiz.queryscope.agent.cli;
 
 import org.junit.jupiter.api.Test;
 
@@ -60,7 +60,7 @@ class LaunchCommandTest {
     void startsTheApplicationWithTheAgentAndTheLaunchersJvmOptions() {
         LaunchCommand command = LaunchCommand.parse("--port=9090", "app.jar", "--debug");
 
-        List<String> process = command.processCommand("java", Path.of("queryscope.jar"),
+        List<String> process = command.applicationCommand("java", Path.of("queryscope.jar"),
                 List.of("-Xmx1g", "-agentlib:jdwp=transport=dt_socket,address=5005", "-Dspring.profiles.active=local"), 42);
 
         assertEquals(List.of("java", "-Xmx1g", "-Dspring.profiles.active=local", "-Dqueryscope.launcherPid=42",

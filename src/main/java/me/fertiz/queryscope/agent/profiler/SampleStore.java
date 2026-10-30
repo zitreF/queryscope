@@ -31,7 +31,7 @@ public final class SampleStore {
         this.maxAgeMillis = maxAge.toMillis();
     }
 
-    public void started(String source, Duration interval) {
+    public void markStarted(String source, Duration interval) {
         this.intervalMillis = interval.toMillis();
         this.source = source;
     }
@@ -60,12 +60,12 @@ public final class SampleStore {
         if (threadName != null) {
             rememberThread(threadId, threadName);
         }
-        samples.addLast(new Sample(epochMillis, threadId, onCpu, truncated, sharedFrameIds(rootFirstFrames)));
-        evict();
+        samples.addLast(new Sample(epochMillis, threadId, onCpu, truncated, internedFrameIds(rootFirstFrames)));
+        evictExpired();
     }
 
-    public synchronized List<Sample> between(long fromMillis, long toMillis) {
-        evict();
+    public synchronized List<Sample> samplesBetween(long fromMillis, long toMillis) {
+        evictExpired();
         List<Sample> selected = new ArrayList<>();
         for (Sample sample : samples) {
             if (sample.epochMillis() >= fromMillis && sample.epochMillis() <= toMillis) {
@@ -75,7 +75,7 @@ public final class SampleStore {
         return selected;
     }
 
-    public synchronized String method(int id) {
+    public synchronized String methodName(int id) {
         return methods.get(id);
     }
 
@@ -83,7 +83,7 @@ public final class SampleStore {
         return threadNames.getOrDefault(threadId, "thread " + threadId);
     }
 
-    private int[] sharedFrameIds(List<String> rootFirstFrames) {
+    private int[] internedFrameIds(List<String> rootFirstFrames) {
         int[] frames = new int[rootFirstFrames.size()];
         for (int index = 0; index < frames.length; index++) {
             frames[index] = methodId(rootFirstFrames.get(index));
@@ -111,7 +111,7 @@ public final class SampleStore {
         return id;
     }
 
-    private void evict() {
+    private void evictExpired() {
         long oldest = clock.millis() - maxAgeMillis;
         while (!samples.isEmpty() && (samples.size() > capacity || samples.peekFirst().epochMillis() < oldest)) {
             samples.removeFirst();

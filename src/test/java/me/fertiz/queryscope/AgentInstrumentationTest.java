@@ -9,15 +9,15 @@ import jakarta.servlet.ServletRequest;
 import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import me.fertiz.queryscope.agent.AgentConfig;
+import me.fertiz.queryscope.agent.config.AgentConfig;
 import me.fertiz.queryscope.agent.AgentInstaller;
-import me.fertiz.queryscope.agent.calltree.AppPackages;
+import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.calltree.CallNode;
 import me.fertiz.queryscope.agent.findings.QueryAnalyzer;
 import me.fertiz.queryscope.agent.findings.TooManyQueries;
 import me.fertiz.queryscope.agent.trace.QueryExecution;
-import me.fertiz.queryscope.agent.trace.RequestTrace;
-import me.fertiz.queryscope.agent.trace.RequestTracer;
+import me.fertiz.queryscope.agent.trace.UnitTrace;
+import me.fertiz.queryscope.agent.trace.UnitTracer;
 import me.fertiz.queryscope.agent.trace.UnitKind;
 import me.fertiz.queryscope.profiled.BookCatalog;
 import net.bytebuddy.agent.ByteBuddyAgent;
@@ -45,7 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AgentInstrumentationTest {
 
-    private static final List<RequestTrace> TRACES = new CopyOnWriteArrayList<>();
+    private static final List<UnitTrace> TRACES = new CopyOnWriteArrayList<>();
     private static final String BY_ID = "select title from books where id = ?";
     private static final long PAUSE_MILLIS = 200;
 
@@ -55,7 +55,7 @@ class AgentInstrumentationTest {
     static void installAgent() throws SQLException {
         AgentInstaller.install(ByteBuddyAgent.install(), List.of(ImportJob.class.getName() + "#run"),
                 AppPackages.of(List.of(BookCatalog.class.getPackageName())));
-        RequestTracer.publishTo(TRACES::add);
+        UnitTracer.publishTo(TRACES::add);
 
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl("jdbc:h2:mem:agent-test;DB_CLOSE_DELAY=-1");
@@ -88,7 +88,7 @@ class AgentInstrumentationTest {
             }
         });
 
-        RequestTrace trace = singleTrace();
+        UnitTrace trace = singleTrace();
         assertEquals(UnitKind.HTTP, trace.kind());
         assertEquals("GET", trace.method());
         assertEquals("/books", trace.path());
@@ -151,7 +151,7 @@ class AgentInstrumentationTest {
             findTitle();
         });
 
-        RequestTrace trace = singleTrace();
+        UnitTrace trace = singleTrace();
         assertEquals("/outer", trace.path());
         assertEquals(2, trace.queries().size());
     }
@@ -160,7 +160,7 @@ class AgentInstrumentationTest {
     void tracesJavaxServletRequestsToo() throws Exception {
         new JavaxWorkChain(AgentInstrumentationTest::findTitle).doFilter(javaxRequest("/legacy"), javaxResponse());
 
-        RequestTrace trace = singleTrace();
+        UnitTrace trace = singleTrace();
         assertEquals(UnitKind.HTTP, trace.kind());
         assertEquals("/legacy", trace.path());
         assertEquals(201, trace.status());
@@ -173,7 +173,7 @@ class AgentInstrumentationTest {
         findTitle();
 
         assertEquals(2, TRACES.size());
-        for (RequestTrace trace : TRACES) {
+        for (UnitTrace trace : TRACES) {
             assertEquals(UnitKind.TASK, trace.kind());
             assertEquals("AgentInstrumentationTest.findTitle", trace.path());
             assertEquals(1, trace.queries().size());
@@ -184,27 +184,27 @@ class AgentInstrumentationTest {
     void entryMethodGroupsAllItsQueriesIntoOneTask() throws SQLException {
         new ImportJob(dataSource).run();
 
-        RequestTrace trace = singleTrace();
+        UnitTrace trace = singleTrace();
         assertEquals(UnitKind.TASK, trace.kind());
         assertEquals("ImportJob.run", trace.path());
         assertEquals(2, trace.queries().size());
     }
 
     @Test
-    void requestClosesBackgroundTaskLeftOpenOnItsThread() throws SQLException {
+    void requestClosesATaskLeftOpenOnItsThread() throws SQLException {
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
             statement.executeQuery("select count(*) from books").close();
             handle(request(DispatcherType.REQUEST, "/books"), AgentInstrumentationTest::findTitle);
         }
 
-        assertEquals(List.of(UnitKind.TASK, UnitKind.HTTP), TRACES.stream().map(RequestTrace::kind).toList());
+        assertEquals(List.of(UnitKind.TASK, UnitKind.HTTP), TRACES.stream().map(UnitTrace::kind).toList());
     }
 
     @Test
     void taskEndsWhenItsConnectionIsReleasedRatherThanAtItsLastQuery() throws Exception {
         new BookCatalog(dataSource).titlesThenPause(PAUSE_MILLIS, 1, 2);
 
-        RequestTrace trace = singleTrace();
+        UnitTrace trace = singleTrace();
         assertEquals(2, trace.queries().size());
         assertTrue(trace.durationNanos() >= Duration.ofMillis(PAUSE_MILLIS).toNanos(), trace.toString());
         assertEveryCallFitsIn(trace);
@@ -218,7 +218,7 @@ class AgentInstrumentationTest {
             handle(request(DispatcherType.REQUEST, "/books"), AgentInstrumentationTest::findTitle);
         }
 
-        RequestTrace task = TRACES.get(0);
+        UnitTrace task = TRACES.get(0);
         assertEquals(UnitKind.TASK, task.kind());
         assertTrue(task.durationNanos() >= Duration.ofMillis(PAUSE_MILLIS).toNanos(), task.toString());
         assertEveryCallFitsIn(task);
@@ -236,7 +236,7 @@ class AgentInstrumentationTest {
             }
         });
 
-        RequestTrace trace = singleTrace();
+        UnitTrace trace = singleTrace();
         assertEquals(1000, trace.queries().size());
         assertEquals(500, trace.omittedQueries());
         assertEquals(1500, trace.queryCount());
@@ -267,7 +267,7 @@ class AgentInstrumentationTest {
     void buildsTheCallTreeOfApplicationMethodsWithTheQueriesEachOneRan() {
         handle(request(DispatcherType.REQUEST, "/catalog"), () -> new BookCatalog(dataSource).titles(1, 2, 3));
 
-        CallNode titles = single(singleTrace().callTree().calls());
+        CallNode titles = single(singleTrace().callTree().topLevelCalls());
         CallNode title = single(titles.children());
         assertEquals(BookCatalog.class.getName() + ".titles", titles.method());
         assertEquals(1, titles.calls());
@@ -287,7 +287,7 @@ class AgentInstrumentationTest {
             catalog.titles(1);
         });
 
-        List<CallNode> calls = singleTrace().callTree().calls();
+        List<CallNode> calls = singleTrace().callTree().topLevelCalls();
         assertEquals(List.of("depth", "reject", "titles"), calls.stream()
                 .map(node -> node.method().substring(node.method().lastIndexOf('.') + 1))
                 .toList());
@@ -300,15 +300,15 @@ class AgentInstrumentationTest {
     void taskStartedInsideApplicationCodeKeepsTheMethodsAlreadyRunning() throws SQLException {
         new BookCatalog(dataSource).titles(1, 2);
 
-        RequestTrace trace = singleTrace();
-        CallNode titles = single(trace.callTree().calls());
+        UnitTrace trace = singleTrace();
+        CallNode titles = single(trace.callTree().topLevelCalls());
         assertEquals("BookCatalog.titles", trace.path());
         assertTrue(titles.startedBeforeUnit());
         assertEquals(List.of(0, 1), single(titles.children()).queryIndexes());
     }
 
-    private static void assertEveryCallFitsIn(RequestTrace trace) {
-        List<CallNode> nodes = new ArrayList<>(trace.callTree().calls());
+    private static void assertEveryCallFitsIn(UnitTrace trace) {
+        List<CallNode> nodes = new ArrayList<>(trace.callTree().topLevelCalls());
         assertFalse(nodes.isEmpty(), trace.toString());
         while (!nodes.isEmpty()) {
             CallNode node = nodes.remove(nodes.size() - 1);
@@ -330,7 +330,7 @@ class AgentInstrumentationTest {
         }
     }
 
-    private static RequestTrace singleTrace() {
+    private static UnitTrace singleTrace() {
         assertEquals(1, TRACES.size(), TRACES.toString());
         return TRACES.get(0);
     }

@@ -9,19 +9,19 @@ const state = {
     refreshSequence: 0,
 };
 
-$('filter').addEventListener('input', event => {
+byId('filter').addEventListener('input', event => {
     state.filter = event.target.value.trim().toLowerCase();
-    render();
+    renderProcessTable();
 });
 
-refreshRepeatedly();
+refreshProcessesRepeatedly();
 
-async function refreshRepeatedly() {
-    await refresh();
-    setTimeout(refreshRepeatedly, REFRESH_MS);
+async function refreshProcessesRepeatedly() {
+    await refreshProcesses();
+    setTimeout(refreshProcessesRepeatedly, REFRESH_MS);
 }
 
-async function refresh() {
+async function refreshProcesses() {
     const sequence = ++state.refreshSequence;
     const {processes, problem} = await fetchProcesses();
     if (sequence !== state.refreshSequence) {
@@ -29,11 +29,11 @@ async function refresh() {
     }
     if (processes) {
         state.processes = processes;
-        setStatus(plural(processes.length, 'Java process', 'Java processes'), true);
+        setHubStatus(countWithNoun(processes.length, 'Java process', 'Java processes'), true);
     } else {
-        setStatus(problem, false);
+        setHubStatus(problem, false);
     }
-    render();
+    renderProcessTable();
 }
 
 async function fetchProcesses() {
@@ -45,65 +45,65 @@ async function fetchProcesses() {
     }
 }
 
-function setStatus(text, live) {
-    $('connection').textContent = text;
+function setHubStatus(text, live) {
+    byId('connection').textContent = text;
     document.body.classList.toggle('live', live);
 }
 
-function render() {
+function renderProcessTable() {
     if (state.processes === null) {
         return;
     }
     const visible = state.processes.filter(process => state.filter === ''
         || `${process.name} ${process.command} ${process.pid}`.toLowerCase().includes(state.filter));
     if (visible.length === 0) {
-        $('processes').replaceChildren(el('p', {class: 'empty'}, state.processes.length === 0
+        byId('processes').replaceChildren(createElement('p', {class: 'empty'}, state.processes.length === 0
             ? 'No other Java process is running. Start your app and it shows up here.'
             : 'No process matches the filter.'));
         return;
     }
-    $('processes').replaceChildren(el('table', {class: 'hub-table'},
-        el('colgroup', {},
-            el('col', {style: {width: 'auto'}}),
-            el('col', {style: {width: '110px'}}),
-            el('col', {style: {width: '340px'}})),
-        el('thead', {}, el('tr', {},
-            el('th', {}, 'Application'),
-            el('th', {class: 'number'}, 'PID'),
-            el('th', {}, ''))),
-        el('tbody', {}, visible.map(row))));
+    byId('processes').replaceChildren(createElement('table', {class: 'hub-table'},
+        createElement('colgroup', {},
+            createElement('col', {style: {width: 'auto'}}),
+            createElement('col', {style: {width: '110px'}}),
+            createElement('col', {style: {width: '340px'}})),
+        createElement('thead', {}, createElement('tr', {},
+            createElement('th', {}, 'Application'),
+            createElement('th', {class: 'number'}, 'PID'),
+            createElement('th', {}, ''))),
+        createElement('tbody', {}, visible.map(createProcessRow))));
 }
 
-function row(process) {
+function createProcessRow(process) {
     const error = state.errors.get(process.pid);
-    return el('tr', {},
-        el('td', {},
-            el('div', {class: 'hub-name'}, process.name),
-            el('div', {class: 'hub-command', title: process.command}, process.command || '—'),
-            error ? el('div', {class: 'hub-error'}, error) : null),
-        el('td', {class: 'number'}, String(process.pid)),
-        el('td', {}, el('div', {class: 'hub-action'}, action(process))));
+    return createElement('tr', {},
+        createElement('td', {},
+            createElement('div', {class: 'hub-name'}, process.name),
+            createElement('div', {class: 'hub-command', title: process.command}, process.command || '—'),
+            error ? createElement('div', {class: 'hub-error'}, error) : null),
+        createElement('td', {class: 'number'}, String(process.pid)),
+        createElement('td', {}, createElement('div', {class: 'hub-action'}, createAttachOrOpenControls(process))));
 }
 
-function action(process) {
+function createAttachOrOpenControls(process) {
     if (process.panelPort) {
         return [
-            el('span', {class: 'hub-attached'}, `Attached on port ${process.panelPort}`),
-            el('a', {class: 'text-button', href: `http://localhost:${process.panelPort}`, target: '_blank', rel: 'noopener'},
+            createElement('span', {class: 'hub-attached'}, `Attached on port ${process.panelPort}`),
+            createElement('a', {class: 'text-button', href: `http://localhost:${process.panelPort}`, target: '_blank', rel: 'noopener'},
                 'Open panel'),
         ];
     }
     const busy = state.attaching.has(process.pid);
-    const button = el('button', {type: 'button', class: 'filled-button', onclick: () => attach(process)},
+    const button = createElement('button', {type: 'button', class: 'filled-button', onclick: () => attachTo(process)},
         busy ? 'Attaching…' : 'Attach');
     button.disabled = busy;
     return button;
 }
 
-async function attach(process) {
+async function attachTo(process) {
     state.attaching.add(process.pid);
     state.errors.delete(process.pid);
-    render();
+    renderProcessTable();
     try {
         const response = await fetch('api/attach', {
             method: 'POST',
@@ -119,7 +119,7 @@ async function attach(process) {
         state.errors.set(process.pid, error.message);
     } finally {
         state.attaching.delete(process.pid);
-        await refresh();
+        await refreshProcesses();
     }
 }
 

@@ -54,9 +54,11 @@ class SamplingTest {
 
     @Test
     void dropsTheAddressOfHiddenClasses() {
-        assertEquals("java.lang.invoke.LambdaForm$MH", Sampling.typeName("java.lang.invoke.LambdaForm$MH/0x000001f0"));
-        assertEquals("java.lang.String$$StringConcat", Sampling.typeName("java.lang.String$$StringConcat.0x000001f0"));
-        assertEquals("com.acme.Job", Sampling.typeName("com.acme.Job"));
+        assertEquals("java.lang.invoke.LambdaForm$MH",
+                Sampling.withoutHiddenClassSuffix("java.lang.invoke.LambdaForm$MH/0x000001f0"));
+        assertEquals("java.lang.String$$StringConcat",
+                Sampling.withoutHiddenClassSuffix("java.lang.String$$StringConcat.0x000001f0"));
+        assertEquals("com.acme.Job", Sampling.withoutHiddenClassSuffix("com.acme.Job"));
     }
 
     private void startSpinning() {
@@ -85,7 +87,7 @@ class SamplingTest {
     }
 
     private boolean contains() {
-        return store.between(0, Long.MAX_VALUE).stream()
-                .anyMatch(sample -> Arrays.stream(sample.frames()).mapToObj(store::method).anyMatch(BUSY::equals));
+        return store.samplesBetween(0, Long.MAX_VALUE).stream()
+                .anyMatch(sample -> Arrays.stream(sample.frames()).mapToObj(store::methodName).anyMatch(BUSY::equals));
     }
 }

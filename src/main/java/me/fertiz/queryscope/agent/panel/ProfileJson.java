@@ -14,7 +14,7 @@ final class ProfileJson {
     private ProfileJson() {
     }
 
-    static String of(Profile profile, SampleStore samples, Profile.Filter filter, List<String> packages) {
+    static String profileToJson(Profile profile, SampleStore samples, Profile.Filter filter, List<String> packages) {
         JsonWriter json = new JsonWriter().beginObject()
                 .name("source").value(samples.source())
                 .name("packages").beginArray();
@@ -37,14 +37,14 @@ final class ProfileJson {
                 .name("app").value(method.app())
                 .name("self").value(method.self())
                 .name("total").value(method.total())
-                .name("own").value(method.own())
+                .name("selfWithLibraries").value(method.selfWithLibraries())
                 .endObject());
         json.endArray().name("root");
-        write(json, profile.root(), Math.max(1, profile.samples() / HIDDEN_BELOW_ONE_SAMPLE_IN), 0);
+        writeNode(json, profile.root(), Math.max(1, profile.samples() / HIDDEN_BELOW_ONE_SAMPLE_IN), 0);
         return json.endObject().toString();
     }
 
-    private static void write(JsonWriter json, Profile.Node node, int minimum, int depth) {
+    private static void writeNode(JsonWriter json, Profile.Node node, int minimum, int depth) {
         json.beginObject()
                 .name("method").value(node.method())
                 .name("app").value(node.app())
@@ -54,7 +54,7 @@ final class ProfileJson {
         if (depth < MAX_DEPTH) {
             node.children().stream()
                     .filter(child -> child.total() >= minimum)
-                    .forEach(child -> write(json, child, minimum, depth + 1));
+                    .forEach(child -> writeNode(json, child, minimum, depth + 1));
         }
         json.endArray().endObject();
     }

@@ -5,12 +5,12 @@ import me.fertiz.queryscope.agent.calltree.CallTree;
 import me.fertiz.queryscope.agent.findings.DuplicateQuery;
 import me.fertiz.queryscope.agent.findings.LargeResult;
 import me.fertiz.queryscope.agent.findings.RepeatedWrite;
-import me.fertiz.queryscope.agent.findings.RequestReport;
+import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.findings.SlowMethod;
 import me.fertiz.queryscope.agent.findings.TooManyQueries;
 import me.fertiz.queryscope.agent.http.JsonWriter;
 import me.fertiz.queryscope.agent.trace.QueryExecution;
-import me.fertiz.queryscope.agent.trace.RequestTrace;
+import me.fertiz.queryscope.agent.trace.UnitTrace;
 import me.fertiz.queryscope.agent.trace.UnitKind;
 import org.junit.jupiter.api.Test;
 
@@ -35,32 +35,32 @@ class ReportJsonTest {
                 + "\"queryIndexes\":[0,1]},"
                 + "{\"type\":\"slowQuery\",\"sql\":\"select * from orders where customer_id = ?\","
                 + "\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"durationMs\":120.000,\"queryIndex\":1}],"
-                + "\"methods\":0}";
+                + "\"methodCount\":0}";
 
-        assertEquals(expected, ReportJson.event(Reports.withFindings()));
+        assertEquals(expected, ReportJson.reportToJson(Reports.withFindings()));
     }
 
     @Test
     void writesListsAndNullCallSites() {
-        String json = ReportJson.list(List.of(Reports.plain(2, "/b"), Reports.plain(1, "/a")));
+        String json = ReportJson.reportsToJson(List.of(Reports.plain(2, "/b"), Reports.plain(1, "/a")));
 
         assertEquals("[{\"id\":2,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/b\",\"status\":200,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":2.000,\"queries\":[{\"sql\":\"select 1\","
                 + "\"parameters\":\"\",\"offsetMs\":0.500,\"durationMs\":0.250,\"rows\":1,\"callSite\":null,\"failed\":false}],"
-                + "\"omittedQueries\":0,\"omittedMs\":0.000,\"findings\":[],\"methods\":0},"
+                + "\"omittedQueries\":0,\"omittedMs\":0.000,\"findings\":[],\"methodCount\":0},"
                 + "{\"id\":1,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/a\",\"status\":200,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":2.000,\"queries\":[{\"sql\":\"select 1\","
                 + "\"parameters\":\"\",\"offsetMs\":0.500,\"durationMs\":0.250,\"rows\":1,\"callSite\":null,\"failed\":false}],"
-                + "\"omittedQueries\":0,\"omittedMs\":0.000,\"findings\":[],\"methods\":0}]", json);
+                + "\"omittedQueries\":0,\"omittedMs\":0.000,\"findings\":[],\"methodCount\":0}]", json);
     }
 
     @Test
     void writesEveryKindOfFinding() {
         QueryExecution query = new QueryExecution("select * from events", "[1]", 0, 1_000_000, 900, null, false);
-        RequestTrace trace = new RequestTrace(9, UnitKind.TASK, "TASK", "ImportJob.run", 0, Reports.STARTED_AT,
+        UnitTrace trace = new UnitTrace(9, UnitKind.TASK, "TASK", "ImportJob.run", 0, Reports.STARTED_AT,
                 2_000_000, List.of(query));
 
-        String json = ReportJson.event(new RequestReport(trace, List.of(
+        String json = ReportJson.reportToJson(new UnitReport(trace, List.of(
                 new RepeatedWrite("insert into events values (?)", null, List.of(0), 1_000_000),
                 new DuplicateQuery("select * from events where id = ?", "[1]", null, List.of(0, 0)),
                 new LargeResult(0, "select * from events", query),
@@ -82,10 +82,10 @@ class ReportJsonTest {
 
     @Test
     void writesHowManyQueriesWereLeftOut() {
-        RequestTrace trace = new RequestTrace(5, UnitKind.TASK, "TASK", "ImportJob.run", 0, Reports.STARTED_AT,
+        UnitTrace trace = new UnitTrace(5, UnitKind.TASK, "TASK", "ImportJob.run", 0, Reports.STARTED_AT,
                 9_000_000, List.of(), CallTree.EMPTY, 0, 1, 500, 2_500_000);
 
-        String json = ReportJson.event(new RequestReport(trace, List.of()));
+        String json = ReportJson.reportToJson(new UnitReport(trace, List.of()));
 
         assertTrue(json.contains("\"queries\":[],\"omittedQueries\":500,\"omittedMs\":2.500,"), json);
     }
@@ -94,10 +94,10 @@ class ReportJsonTest {
     void writesTheCallTreeWithItsQueries() {
         CallNode toDto = new CallNode("com.acme.Mapper.toDto", 2, 600_000, 600_000, false, List.of(0, 1), List.of());
         CallNode list = new CallNode("com.acme.Service.list", 1, 1_000_000, 400_000, true, List.of(), List.of(toDto));
-        RequestTrace trace = new RequestTrace(4, UnitKind.HTTP, "GET", "/orders", 200, Reports.STARTED_AT, 2_000_000,
+        UnitTrace trace = new UnitTrace(4, UnitKind.HTTP, "GET", "/orders", 200, Reports.STARTED_AT, 2_000_000,
                 List.of(), new CallTree(List.of(list), List.of(2), false), 3, 1, 0, 0);
 
-        String json = ReportJson.calls(new RequestReport(trace, List.of()), List.of("com.acme"));
+        String json = ReportJson.callTreeToJson(new UnitReport(trace, List.of()), List.of("com.acme"));
 
         assertEquals("{\"id\":4,\"durationMs\":2.000,\"packages\":[\"com.acme\"],\"truncated\":false,"
                 + "\"classesLoaded\":3,\"warmUp\":false,\"outsideQueryIndexes\":[2],\"methods\":["

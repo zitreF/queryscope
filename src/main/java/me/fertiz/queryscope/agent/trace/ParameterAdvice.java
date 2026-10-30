@@ -15,6 +15,6 @@ public final class ParameterAdvice {
             @Advice.Argument(0) int index,
             @Advice.Argument(value = 1, typing = Assigner.Typing.DYNAMIC) Object value
     ) {
-        RequestTracer.parameterSet(statement, setter, index, value);
+        UnitTracer.parameterSet(statement, setter, index, value);
     }
 }

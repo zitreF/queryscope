@@ -1,11 +1,12 @@
-package me.fertiz.queryscope.agent.calltree;
+package me.fertiz.queryscope.agent.appcode;
 
-import me.fertiz.queryscope.agent.QueryScopeAgent;
-
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 public final class CallSites {
+
+    public static final String AGENT_PACKAGE_PREFIX = "me.fertiz.queryscope.agent.";
 
     private static final StackWalker WALKER = StackWalker.getInstance();
     private static final List<String> FRAMEWORK_PACKAGES = List.of(
@@ -15,25 +16,35 @@ public final class CallSites {
             "com.microsoft.sqlserver.", "com.fasterxml.", "tools.jackson.", "io.micrometer.",
             "org.flywaydb.", "liquibase.", "org.jooq.", "io.netty.", "reactor.", "kotlin.", "kotlinx.", "scala.",
             "groovy.", "org.codehaus.groovy.", "org.slf4j.", "ch.qos.logback.", "org.aspectj.",
-            "org.junit.", "org.gradle.", "worker.org.gradle.", "com.intellij.", QueryScopeAgent.PACKAGE);
+            "org.junit.", "org.gradle.", "worker.org.gradle.", "com.intellij.", AGENT_PACKAGE_PREFIX);
+
+    private static volatile List<String> givenPackagePrefixes = List.of();
 
     private CallSites() {
     }
 
-    public static String callSite() {
-        return applicationFrame()
+    public static void treatAsApplicationCode(List<String> packages) {
+        List<String> prefixes = new ArrayList<>();
+        for (String name : packages) {
+            prefixes.add(name + ".");
+        }
+        givenPackagePrefixes = List.copyOf(prefixes);
+    }
+
+    public static String currentCallSite() {
+        return firstApplicationFrame()
                 .map(frame -> frame.getClassName() + "." + frame.getMethodName()
                         + "(" + frame.getFileName() + ":" + frame.getLineNumber() + ")")
                 .orElse(null);
     }
 
-    public static String entryName() {
-        return applicationFrame()
-                .map(frame -> shortName(frame.getClassName() + "." + frame.getMethodName()))
+    public static String nearestApplicationMethodOrThread() {
+        return firstApplicationFrame()
+                .map(frame -> classAndMethod(frame.getClassName() + "." + frame.getMethodName()))
                 .orElseGet(() -> "thread " + Thread.currentThread().getName());
     }
 
-    public static String shortName(String qualifiedMethod) {
+    public static String classAndMethod(String qualifiedMethod) {
         int methodDot = qualifiedMethod.lastIndexOf('.');
         int typeDot = qualifiedMethod.lastIndexOf('.', methodDot - 1);
         return qualifiedMethod.substring(typeDot + 1);
@@ -44,8 +55,13 @@ public final class CallSites {
     }
 
     static boolean isApplicationCode(String className) {
-        if (isGenerated(className)) {
+        if (isGenerated(className) || className.startsWith(AGENT_PACKAGE_PREFIX)) {
             return false;
+        }
+        for (String prefix : givenPackagePrefixes) {
+            if (className.startsWith(prefix)) {
+                return true;
+            }
         }
         for (String framework : FRAMEWORK_PACKAGES) {
             if (className.startsWith(framework)) {
@@ -55,7 +71,7 @@ public final class CallSites {
         return true;
     }
 
-    private static Optional<StackWalker.StackFrame> applicationFrame() {
+    private static Optional<StackWalker.StackFrame> firstApplicationFrame() {
         return WALKER.walk(frames -> frames.filter(frame -> isApplicationCode(frame.getClassName())).findFirst());
     }
 }

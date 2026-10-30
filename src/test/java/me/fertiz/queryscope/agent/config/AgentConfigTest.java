@@ -1,4 +1,4 @@
-package me.fertiz.queryscope.agent;
+package me.fertiz.queryscope.agent.config;
 
 import org.junit.jupiter.api.Test;
 
@@ -50,6 +50,7 @@ class AgentConfigTest {
         assertEquals(List.of("com.acme.shop", "com.acme.billing"), config.packages());
         assertEquals(Duration.ofMillis(40), config.slowMethodThreshold());
         assertTrue(config.callTree());
+        assertFalse(AgentConfig.parse("callTree=false").callTree());
         assertFalse(AgentConfig.parse("profile=false").callTree());
         assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("package=com..acme"));
         assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("package=com.acme.*"));

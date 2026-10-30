@@ -1,7 +1,7 @@
 package me.fertiz.queryscope.agent.profiler;
 
-import me.fertiz.queryscope.agent.QueryScopeAgent;
-import me.fertiz.queryscope.agent.calltree.AppPackages;
+import me.fertiz.queryscope.agent.appcode.AppPackages;
+import me.fertiz.queryscope.agent.appcode.CallSites;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -38,20 +38,21 @@ public final class Profile {
 
     public static Profile build(SampleStore store, AppPackages packages, Filter filter) {
         Map<Integer, Frame> frames = new HashMap<>();
-        Map<String, Counts> counts = new LinkedHashMap<>();
+        Map<String, MethodCounts> counts = new LinkedHashMap<>();
         Map<Long, Integer> perThread = new LinkedHashMap<>();
         Node root = new Node(ROOT, false);
         int samples = 0;
         int agentSamples = 0;
-        for (Sample sample : store.between(filter.fromMillis(), filter.toMillis())) {
-            if ((!filter.includeNative() && !sample.onCpu()) || !filter.includes(sample)) {
+        for (Sample sample : store.samplesBetween(filter.fromMillis(), filter.toMillis())) {
+            if ((!filter.includeNative() && !sample.onCpu()) || !filter.isInWindows(sample)) {
                 continue;
             }
             boolean selectedThread = filter.threadId() == Filter.ALL_THREADS || sample.threadId() == filter.threadId();
             Frame[] stack = new Frame[sample.frames().length];
             boolean inAgent = false;
             for (int index = 0; index < stack.length; index++) {
-                stack[index] = frames.computeIfAbsent(sample.frames()[index], id -> Frame.of(store.method(id), packages));
+                stack[index] = frames.computeIfAbsent(sample.frames()[index],
+                        id -> Frame.of(store.methodName(id), packages));
                 inAgent |= stack[index].agent();
             }
             if (inAgent) {
@@ -66,7 +67,7 @@ public final class Profile {
             }
             samples++;
             addPath(root, filter.appOnly() ? yourCodePath(stack) : fullPath(stack, sample.truncated()));
-            count(counts, stack);
+            countHotMethods(counts, stack);
         }
         return new Profile(samples, agentSamples, root, hottest(counts), threads(store, perThread));
     }
@@ -127,12 +128,12 @@ public final class Profile {
         node.self++;
     }
 
-    private static void count(Map<String, Counts> counts, Frame[] stack) {
+    private static void countHotMethods(Map<String, MethodCounts> counts, Frame[] stack) {
         Set<String> seen = new HashSet<>();
         Frame deepestApp = null;
         for (Frame frame : stack) {
             if (seen.add(frame.method())) {
-                counts.computeIfAbsent(frame.method(), method -> new Counts(frame.app())).total++;
+                counts.computeIfAbsent(frame.method(), method -> new MethodCounts(frame.app())).total++;
             }
             if (frame.app()) {
                 deepestApp = frame;
@@ -140,14 +141,14 @@ public final class Profile {
         }
         counts.get(stack[stack.length - 1].method()).self++;
         if (deepestApp != null) {
-            counts.get(deepestApp.method()).own++;
+            counts.get(deepestApp.method()).selfWithLibraries++;
         }
     }
 
-    private static List<HotMethod> hottest(Map<String, Counts> counts) {
+    private static List<HotMethod> hottest(Map<String, MethodCounts> counts) {
         List<HotMethod> all = counts.entrySet().stream()
                 .map(entry -> new HotMethod(entry.getKey(), entry.getValue().app, entry.getValue().self,
-                        entry.getValue().total, entry.getValue().own))
+                        entry.getValue().total, entry.getValue().selfWithLibraries))
                 .toList();
         return Stream.concat(
                         all.stream()
@@ -155,8 +156,8 @@ public final class Profile {
                                 .sorted(Comparator.comparingInt(HotMethod::self).reversed())
                                 .limit(MAX_HOT),
                         all.stream()
-                                .filter(method -> method.own() > 0)
-                                .sorted(Comparator.comparingInt(HotMethod::own).reversed())
+                                .filter(method -> method.selfWithLibraries() > 0)
+                                .sorted(Comparator.comparingInt(HotMethod::selfWithLibraries).reversed())
                                 .limit(MAX_HOT))
                 .distinct()
                 .toList();
@@ -183,11 +184,11 @@ public final class Profile {
             windows = List.copyOf(windows);
         }
 
-        public static Filter everything() {
+        public static Filter allSamples() {
             return new Filter(0, Long.MAX_VALUE, ALL_THREADS, false, false, List.of());
         }
 
-        boolean includes(Sample sample) {
+        boolean isInWindows(Sample sample) {
             if (windows.isEmpty()) {
                 return true;
             }
@@ -204,7 +205,7 @@ public final class Profile {
     public record Window(long threadId, long fromMillis, long toMillis) {
     }
 
-    public record HotMethod(String method, boolean app, int self, int total, int own) {
+    public record HotMethod(String method, boolean app, int self, int total, int selfWithLibraries) {
     }
 
     public record ThreadSamples(long id, String name, int samples) {
@@ -216,18 +217,19 @@ public final class Profile {
         private static final Frame OUTSIDE = new Frame(OUTSIDE_YOUR_CODE, false, false);
 
         private static Frame of(String method, AppPackages packages) {
-            return new Frame(method, packages.covers(classOf(method)), method.startsWith(QueryScopeAgent.PACKAGE));
+            return new Frame(method, packages.includesClass(classOf(method)),
+                    method.startsWith(CallSites.AGENT_PACKAGE_PREFIX));
         }
     }
 
-    private static final class Counts {
+    private static final class MethodCounts {
 
         private final boolean app;
         private int self;
         private int total;
-        private int own;
+        private int selfWithLibraries;
 
-        private Counts(boolean app) {
+        private MethodCounts(boolean app) {
             this.app = app;
         }
     }

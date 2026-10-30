@@ -253,13 +253,13 @@ after the jar path, separated by commas: `-javaagent:queryscope.jar=port=9090,sl
 | `maxQueries`        | `30`       | Requests or tasks running at least this many queries are reported       |
 | `slowMethodMs`      | `100`      | Methods spending at least this long in their own code are reported      |
 | `package`           | main class | Package whose methods form the call tree and count as your code, can be repeated |
-| `profile`           | `true`     | Records the call tree of your methods                                   |
+| `callTree`          | `true`     | Records the call tree of your methods, also accepted as `profile`       |
 | `sampling`          | `true`     | Runs the sampling profiler                                              |
 | `sampleMs`          | `10`       | How often the profiler takes a sample, from 1 to 1000 ms                |
 | `entry`             | none       | `Class#method` whose whole call becomes one task, can be repeated       |
 | `attach`            | none       | Hub only: attaches to this process ID and exits                         |
 
-`open`, `summary`, `profile` and `sampling` work without a value, so `--open` means `--open=true`. An unknown option or
+`open`, `summary`, `callTree` and `sampling` work without a value, so `--open` means `--open=true`. An unknown option or
 an invalid value stops QueryScope at startup with a message that names it. Anything else that fails at startup, such as
 a runtime built without the `jdk.httpserver` or `java.sql` module, is logged and the application runs on without
 QueryScope or without its panel. When 7070 is taken, for example by the hub, the panel and the hub move to a free port
@@ -411,11 +411,11 @@ production.
 - HTTP servers that are not servlet containers, such as the JDK's `HttpServer` or Netty, are not recognized as
   requests. Their queries still show up as tasks.
 - `Statement.addBatch(sql)` batches are not recorded. Prepared statement batches are.
-- Call sites skip `org.springframework.*` frames, so apps whose own code lives under that package, such as Spring
-  PetClinic, show the nearest frame outside it. QueryScope cannot detect such a package from the main class either;
-  pass it with `--package=org.springframework.samples.petclinic` to get the call tree and the *Your code* views.
+- QueryScope cannot tell by itself that code under a framework namespace is yours, as in Spring PetClinic's
+  `org.springframework.samples.petclinic`: without help its call sites point at the nearest frame outside it and the
+  call tree stays empty. Pass `--package=org.springframework.samples.petclinic` and both work as for any other app.
 - The call tree costs a few dozen nanoseconds per call of your methods. A tight loop that calls tiny methods millions
-  of times gets noticeably slower; `profile=false` turns the call tree off.
+  of times gets noticeably slower; `callTree=false` turns the call tree off.
 - Flight Recorder samples only threads running Java code, skips threads inside some JVM stubs such as array copies,
   and does not sample threads that sleep or wait on a lock.
 - An attached agent cannot be unloaded, and requests already running when it attaches are not recorded.

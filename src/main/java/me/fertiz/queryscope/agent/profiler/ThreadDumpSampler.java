@@ -22,7 +22,7 @@ final class ThreadDumpSampler {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
-        }, Sampling.OWN_THREADS + "thread-dumps");
+        }, Sampling.THREAD_NAME_PREFIX + "thread-dumps");
         sampler.setDaemon(true);
         sampler.start();
         return sampler::interrupt;
@@ -39,7 +39,7 @@ final class ThreadDumpSampler {
             }
             List<String> methods = new ArrayList<>(stack.length);
             for (int index = stack.length - 1; index >= 0; index--) {
-                methods.add(Sampling.methodName(stack[index].getClassName(), stack[index].getMethodName()));
+                methods.add(Sampling.qualifiedMethod(stack[index].getClassName(), stack[index].getMethodName()));
             }
             store.add(now, thread.getId(), thread.getName(), !stack[0].isNativeMethod(), false, methods);
         }

@@ -25,7 +25,7 @@ class SampleStoreTest {
             store.add(NOW.minusSeconds(second).toEpochMilli(), 1, "worker", true, false, STACK);
         }
 
-        List<Sample> samples = store.between(0, Long.MAX_VALUE);
+        List<Sample> samples = store.samplesBetween(0, Long.MAX_VALUE);
 
         assertEquals(List.of(NOW.minusSeconds(3).toEpochMilli(), NOW.minusSeconds(2).toEpochMilli(),
                 NOW.minusSeconds(1).toEpochMilli()), samples.stream().map(Sample::epochMillis).toList());
@@ -36,10 +36,10 @@ class SampleStoreTest {
         store.add(NOW.toEpochMilli(), 7, "http-nio-8080-exec-1", true, false, STACK);
         store.add(NOW.toEpochMilli(), 7, "http-nio-8080-exec-1", false, false, STACK);
 
-        List<Sample> samples = store.between(NOW.toEpochMilli(), NOW.toEpochMilli());
+        List<Sample> samples = store.samplesBetween(NOW.toEpochMilli(), NOW.toEpochMilli());
 
         assertSame(samples.get(0).frames(), samples.get(1).frames());
-        assertEquals("com.acme.Job.run", store.method(samples.get(0).frames()[1]));
+        assertEquals("com.acme.Job.run", store.methodName(samples.get(0).frames()[1]));
         assertEquals("http-nio-8080-exec-1", store.threadName(7));
         assertEquals("thread 8", store.threadName(8));
     }

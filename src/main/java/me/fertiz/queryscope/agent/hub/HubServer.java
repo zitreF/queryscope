@@ -13,9 +13,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static me.fertiz.queryscope.agent.http.HttpSupport.JSON;
-import static me.fertiz.queryscope.agent.http.HttpSupport.allow;
+import static me.fertiz.queryscope.agent.http.HttpSupport.requireMethod;
 import static me.fertiz.queryscope.agent.http.HttpSupport.respond;
-import static me.fertiz.queryscope.agent.http.HttpSupport.status;
+import static me.fertiz.queryscope.agent.http.HttpSupport.sendStatus;
 
 public final class HubServer {
 
@@ -36,13 +36,13 @@ public final class HubServer {
     public static LocalServer start(int port, boolean portGiven, Processes processes) throws IOException {
         HubServer hub = new HubServer(processes);
         return LocalServer.start(port, portGiven, "queryscope-hub", Map.of(
-                "/", HttpSupport.assets(ASSETS),
+                "/", HttpSupport.staticFiles(ASSETS),
                 "/api/processes", hub::serveProcesses,
-                "/api/attach", hub::attach));
+                "/api/attach", hub::serveAttach));
     }
 
     private void serveProcesses(HttpExchange exchange) throws IOException {
-        if (!allow(exchange, "GET")) {
+        if (!requireMethod(exchange, "GET")) {
             return;
         }
         JsonWriter json = new JsonWriter().beginArray();
@@ -62,22 +62,22 @@ public final class HubServer {
         respond(exchange, 200, JSON, json.endArray().toString());
     }
 
-    private void attach(HttpExchange exchange) throws IOException {
-        if (!allow(exchange, "POST")) {
+    private void serveAttach(HttpExchange exchange) throws IOException {
+        if (!requireMethod(exchange, "POST")) {
             return;
         }
         String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
         if (contentType == null || !contentType.startsWith("application/json")) {
-            status(exchange, 415);
+            sendStatus(exchange, 415);
             return;
         }
         if (!HttpSupport.sameOrigin(exchange)) {
-            status(exchange, 403);
+            sendStatus(exchange, 403);
             return;
         }
-        Matcher pid = PID.matcher(body(exchange).trim());
+        Matcher pid = PID.matcher(readBody(exchange).trim());
         if (!pid.matches()) {
-            respond(exchange, 400, JSON, error("Send the process as {\"pid\": 1234}"));
+            respond(exchange, 400, JSON, errorJson("Send the process as {\"pid\": 1234}"));
             return;
         }
         long id = Long.parseLong(pid.group(1));
@@ -88,17 +88,17 @@ public final class HubServer {
                     .name("panelPort").value(port)
                     .endObject().toString());
         } catch (IOException e) {
-            respond(exchange, 409, JSON, error(e.getMessage()));
+            respond(exchange, 409, JSON, errorJson(e.getMessage()));
         }
     }
 
-    private static String body(HttpExchange exchange) throws IOException {
+    private static String readBody(HttpExchange exchange) throws IOException {
         try (InputStream in = exchange.getRequestBody()) {
             return new String(in.readNBytes(MAX_BODY), StandardCharsets.UTF_8);
         }
     }
 
-    private static String error(String message) {
+    private static String errorJson(String message) {
         return new JsonWriter().beginObject().name("error").value(message).endObject().toString();
     }
 }

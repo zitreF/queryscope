@@ -28,8 +28,8 @@ public final class LocalServer {
     public static LocalServer start(int port, boolean portGiven, String name, Map<String, HttpHandler> routes)
             throws IOException {
         HttpServer server = bind(port, portGiven);
-        ExecutorService executor = Executors.newCachedThreadPool(daemonThreads(name));
-        routes.forEach((path, handler) -> server.createContext(path, HttpSupport.localOnly(handler)));
+        ExecutorService executor = Executors.newCachedThreadPool(daemonThreadFactory(name));
+        routes.forEach((path, handler) -> server.createContext(path, HttpSupport.localhostOnly(handler)));
         server.setExecutor(executor);
         startOnDaemonThread(server, name);
         return new LocalServer(server, executor);
@@ -61,7 +61,7 @@ public final class LocalServer {
         starter.start();
     }
 
-    private static ThreadFactory daemonThreads(String name) {
+    private static ThreadFactory daemonThreadFactory(String name) {
         AtomicInteger counter = new AtomicInteger();
         return task -> {
             Thread thread = new Thread(task, name + "-" + counter.incrementAndGet());

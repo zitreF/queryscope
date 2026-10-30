@@ -28,7 +28,7 @@ public final class CallTreeBuilder {
         lastExitNanos = nanos;
     }
 
-    Node child(Node parent, String method) {
+    Node findOrAddChild(Node parent, String method) {
         if (parent == null) {
             return null;
         }
@@ -47,7 +47,7 @@ public final class CallTreeBuilder {
     }
 
     CallTree build() {
-        return new CallTree(root.builtChildren(), root.queryIndexes, truncated);
+        return new CallTree(root.buildChildren(), root.queryIndexes, truncated);
     }
 
     static final class Node {
@@ -65,31 +65,31 @@ public final class CallTreeBuilder {
             this.depth = depth;
         }
 
-        void called() {
+        void countCall() {
             calls++;
         }
 
-        void calledBeforeUnit() {
+        void countCallStartedBeforeUnit() {
             calls++;
             startedBeforeUnit = true;
         }
 
-        void spent(long nanos) {
+        void addTime(long nanos) {
             totalNanos += Math.max(0, nanos);
         }
 
-        void queryRan(int index) {
+        void addQuery(int index) {
             queryIndexes.add(index);
         }
 
         private CallNode build() {
-            List<CallNode> built = builtChildren();
+            List<CallNode> built = buildChildren();
             long childNanos = built.stream().mapToLong(CallNode::totalNanos).sum();
             return new CallNode(method, calls, totalNanos, Math.max(0, totalNanos - childNanos), startedBeforeUnit,
                     queryIndexes, built);
         }
 
-        private List<CallNode> builtChildren() {
+        private List<CallNode> buildChildren() {
             return children.values().stream().map(Node::build).toList();
         }
     }

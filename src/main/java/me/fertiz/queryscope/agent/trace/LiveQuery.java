@@ -1,7 +1,7 @@
 package me.fertiz.queryscope.agent.trace;
 
 
-final class QueryRecord {
+final class LiveQuery {
 
     private final String sql;
     private final String parameters;
@@ -11,7 +11,7 @@ final class QueryRecord {
     private final boolean failed;
     private volatile int rows = QueryExecution.NO_RESULT;
 
-    QueryRecord(String sql, String parameters, long offsetNanos, long durationNanos, String callSite, boolean failed) {
+    LiveQuery(String sql, String parameters, long offsetNanos, long durationNanos, String callSite, boolean failed) {
         this.sql = sql;
         this.parameters = parameters;
         this.offsetNanos = offsetNanos;
@@ -30,7 +30,7 @@ final class QueryRecord {
         rows++;
     }
 
-    QueryExecution toExecution() {
+    QueryExecution snapshot() {
         return new QueryExecution(sql, parameters, offsetNanos, durationNanos, rows, callSite, failed);
     }
 }

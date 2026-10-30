@@ -1,21 +1,21 @@
-const $ = id => document.getElementById(id);
+const byId = id => document.getElementById(id);
 
 let snackbarTimer = 0;
 
 function showSnackbar(text, durationMs) {
-    $('snackbar-text').textContent = text;
-    $('snackbar').hidden = false;
+    byId('snackbar-text').textContent = text;
+    byId('snackbar').hidden = false;
     clearTimeout(snackbarTimer);
-    snackbarTimer = setTimeout(() => $('snackbar').hidden = true, durationMs);
+    snackbarTimer = setTimeout(() => byId('snackbar').hidden = true, durationMs);
 }
 
-function plural(count, one, many) {
-    return `${count} ${count === 1 ? one : many}`;
+function countWithNoun(count, singular, plural) {
+    return `${count} ${count === 1 ? singular : plural}`;
 }
 
-function el(tag, properties, ...children) {
+function createElement(tag, attributes, ...children) {
     const node = document.createElement(tag);
-    for (const [key, value] of Object.entries(properties)) {
+    for (const [key, value] of Object.entries(attributes)) {
         if (key === 'class') {
             node.className = value;
         } else if (key === 'style') {

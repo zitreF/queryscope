@@ -9,6 +9,6 @@ public final class ClearParametersAdvice {
 
     @Advice.OnMethodExit(suppress = Throwable.class)
     public static void exit(@Advice.This Object statement) {
-        RequestTracer.parametersCleared(statement);
+        UnitTracer.parametersCleared(statement);
     }
 }

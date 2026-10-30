@@ -1,14 +1,14 @@
 package me.fertiz.queryscope.agent.console;
 
-import me.fertiz.queryscope.agent.calltree.AppPackages;
+import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.findings.DuplicateQuery;
 import me.fertiz.queryscope.agent.findings.Finding;
 import me.fertiz.queryscope.agent.findings.NPlusOne;
-import me.fertiz.queryscope.agent.findings.RequestReport;
+import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.profiler.Profile;
 import me.fertiz.queryscope.agent.profiler.SampleStore;
 import me.fertiz.queryscope.agent.trace.QueryExecution;
-import me.fertiz.queryscope.agent.trace.RequestTrace;
+import me.fertiz.queryscope.agent.trace.UnitTrace;
 import me.fertiz.queryscope.agent.trace.UnitKind;
 import org.junit.jupiter.api.Test;
 
@@ -117,18 +117,18 @@ class SessionSummaryTest {
 
     private String print(int openTasks) {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        Profile profile = Profile.build(samples, AppPackages.of(List.of("com.acme")), Profile.Filter.everything());
+        Profile profile = Profile.build(samples, AppPackages.of(List.of("com.acme")), Profile.Filter.allSamples());
         summary.print(new PrintStream(bytes, true, StandardCharsets.UTF_8), profile, openTasks);
         return bytes.toString(StandardCharsets.UTF_8);
     }
 
-    private static RequestReport http(String path, int queries, List<Finding> findings) {
-        return new RequestReport(new RequestTrace(1, UnitKind.HTTP, "GET", path, 200, STARTED_AT, 10_000_000,
+    private static UnitReport http(String path, int queries, List<Finding> findings) {
+        return new UnitReport(new UnitTrace(1, UnitKind.HTTP, "GET", path, 200, STARTED_AT, 10_000_000,
                 queries(queries)), findings);
     }
 
-    private static RequestReport task(String name, int queries) {
-        return new RequestReport(new RequestTrace(2, UnitKind.TASK, null, name, 0, STARTED_AT, 4_000_000,
+    private static UnitReport task(String name, int queries) {
+        return new UnitReport(new UnitTrace(2, UnitKind.TASK, null, name, 0, STARTED_AT, 4_000_000,
                 queries(queries)), List.of());
     }
 

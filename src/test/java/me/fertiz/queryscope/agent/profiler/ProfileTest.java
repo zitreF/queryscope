@@ -1,6 +1,6 @@
 package me.fertiz.queryscope.agent.profiler;
 
-import me.fertiz.queryscope.agent.calltree.AppPackages;
+import me.fertiz.queryscope.agent.appcode.AppPackages;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -31,7 +31,7 @@ class ProfileTest {
         sample(1, NOW, RUN, RENDER, APPEND);
         sample(1, NOW, RUN, RENDER, FORMAT);
 
-        Profile profile = Profile.build(store, ACME, everything(false));
+        Profile profile = Profile.build(store, ACME, allSamples(false));
 
         Profile.Node render = only(only(profile.root()));
         assertEquals(3, profile.samples());
@@ -48,7 +48,7 @@ class ProfileTest {
         sample(1, NOW, RUN, RENDER, "org.lib.Template.apply", APPEND);
         sample(1, NOW, RUN, "org.lib.Scheduler.tick");
 
-        Profile profile = Profile.build(store, ACME, everything(true));
+        Profile profile = Profile.build(store, ACME, allSamples(true));
 
         assertEquals(List.of(RENDER, Profile.OUTSIDE_YOUR_CODE),
                 profile.root().children().stream().map(Profile.Node::method).toList());
@@ -61,7 +61,7 @@ class ProfileTest {
         sample(1, NOW, RUN, RENDER, APPEND);
         sample(1, NOW, RUN, RENDER, FORMAT, APPEND);
 
-        List<Profile.HotMethod> hot = Profile.build(store, ACME, everything(false)).hot();
+        List<Profile.HotMethod> hot = Profile.build(store, ACME, allSamples(false)).hot();
 
         assertEquals(new Profile.HotMethod(APPEND, false, 2, 2, 0), hot.get(0));
         assertTrue(hot.contains(new Profile.HotMethod(RENDER, true, 0, 2, 1)), hot.toString());
@@ -89,7 +89,7 @@ class ProfileTest {
         sample(1, NOW, RUN, RENDER);
         sample(1, NOW, RUN, "me.fertiz.queryscope.agent.panel.PanelServer.serveProfile");
 
-        Profile profile = Profile.build(store, ACME, everything(false));
+        Profile profile = Profile.build(store, ACME, allSamples(false));
 
         assertEquals(1, profile.samples());
         assertEquals(1, profile.agentSamples());
@@ -101,7 +101,7 @@ class ProfileTest {
         sample(2, NOW, RUN, "me.fertiz.queryscope.agent.AgentInstaller.install");
         sample(2, NOW, RUN, "me.fertiz.queryscope.agent.AgentInstaller.install");
 
-        Profile all = Profile.build(store, ACME, everything(false));
+        Profile all = Profile.build(store, ACME, allSamples(false));
         Profile secondThread = Profile.build(store, ACME,
                 new Profile.Filter(0, Long.MAX_VALUE, 2, false, false, List.of()));
 
@@ -115,7 +115,7 @@ class ProfileTest {
     void putsTruncatedStacksUnderTheirOwnRoot() {
         store.add(NOW, 1, "worker", true, true, List.of(RENDER, APPEND));
 
-        Profile profile = Profile.build(store, ACME, everything(false));
+        Profile profile = Profile.build(store, ACME, allSamples(false));
 
         assertEquals(Profile.TRUNCATED, only(profile.root()).method());
     }
@@ -124,7 +124,7 @@ class ProfileTest {
         store.add(millis, thread, "thread " + thread, true, false, List.of(frames));
     }
 
-    private static Profile.Filter everything(boolean appOnly) {
+    private static Profile.Filter allSamples(boolean appOnly) {
         return new Profile.Filter(0, Long.MAX_VALUE, Profile.Filter.ALL_THREADS, appOnly, false, List.of());
     }
 

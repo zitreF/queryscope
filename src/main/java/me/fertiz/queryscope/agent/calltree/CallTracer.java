@@ -35,7 +35,7 @@ public final class CallTracer {
             return null;
         }
         CallTreeBuilder tree = new CallTreeBuilder();
-        STACKS.get().attach(tree, startedNanos);
+        STACKS.get().startRecording(tree, startedNanos);
         return tree;
     }
 
@@ -53,7 +53,7 @@ public final class CallTracer {
         if (tree == null) {
             return CallTree.EMPTY;
         }
-        STACKS.get().detach(tree, endNanos);
+        STACKS.get().stopRecording(tree, endNanos);
         return tree.build();
     }
 
@@ -61,7 +61,7 @@ public final class CallTracer {
 
         private String[] methods = new String[32];
         private long[] starts = new long[32];
-        private boolean[] recursive = new boolean[32];
+        private boolean[] repeatsParent = new boolean[32];
         private CallTreeBuilder.Node[] nodes = new CallTreeBuilder.Node[32];
         private int depth;
         private CallTreeBuilder tree;
@@ -72,11 +72,11 @@ public final class CallTracer {
             }
             boolean repeats = depth > 0 && method.equals(methods[depth - 1]);
             methods[depth] = method;
-            recursive[depth] = repeats;
+            repeatsParent[depth] = repeats;
             if (tree != null) {
-                CallTreeBuilder.Node node = repeats ? nodes[depth - 1] : tree.child(parentOf(depth), method);
+                CallTreeBuilder.Node node = repeats ? nodes[depth - 1] : tree.findOrAddChild(parentOf(depth), method);
                 if (node != null) {
-                    node.called();
+                    node.countCall();
                 }
                 nodes[depth] = node;
                 starts[depth] = System.nanoTime();
@@ -91,18 +91,18 @@ public final class CallTracer {
             long now = tree == null ? 0 : System.nanoTime();
             while (depth >= frameDepth) {
                 depth--;
-                close(depth, now);
+                closeFrame(depth, now);
                 methods[depth] = null;
             }
         }
 
-        void attach(CallTreeBuilder tree, long startedNanos) {
+        void startRecording(CallTreeBuilder tree, long startedNanos) {
             this.tree = tree;
             for (int index = 0; index < depth; index++) {
                 CallTreeBuilder.Node parent = parentOf(index);
-                CallTreeBuilder.Node node = recursive[index] ? parent : tree.child(parent, methods[index]);
+                CallTreeBuilder.Node node = repeatsParent[index] ? parent : tree.findOrAddChild(parent, methods[index]);
                 if (node != null) {
-                    node.calledBeforeUnit();
+                    node.countCallStartedBeforeUnit();
                 }
                 nodes[index] = node;
                 starts[index] = startedNanos;
@@ -115,19 +115,19 @@ public final class CallTracer {
             }
             for (int frame = depth - 1; frame >= 0; frame--) {
                 if (nodes[frame] != null) {
-                    nodes[frame].queryRan(index);
+                    nodes[frame].addQuery(index);
                     return;
                 }
             }
-            tree.root().queryRan(index);
+            tree.root().addQuery(index);
         }
 
-        void detach(CallTreeBuilder tree, long endNanos) {
+        void stopRecording(CallTreeBuilder tree, long endNanos) {
             if (this.tree != tree) {
                 return;
             }
             for (int index = 0; index < depth; index++) {
-                close(index, endNanos);
+                closeFrame(index, endNanos);
             }
             this.tree = null;
         }
@@ -136,9 +136,9 @@ public final class CallTracer {
             return depth == 0 ? Optional.empty() : Optional.of(methods[0]);
         }
 
-        private void close(int index, long nowNanos) {
-            if (nodes[index] != null && !recursive[index]) {
-                nodes[index].spent(nowNanos - starts[index]);
+        private void closeFrame(int index, long nowNanos) {
+            if (nodes[index] != null && !repeatsParent[index]) {
+                nodes[index].addTime(nowNanos - starts[index]);
                 tree.methodExited(nowNanos);
             }
             nodes[index] = null;
@@ -152,7 +152,7 @@ public final class CallTracer {
             int length = methods.length * 2;
             methods = Arrays.copyOf(methods, length);
             starts = Arrays.copyOf(starts, length);
-            recursive = Arrays.copyOf(recursive, length);
+            repeatsParent = Arrays.copyOf(repeatsParent, length);
             nodes = Arrays.copyOf(nodes, length);
         }
     }

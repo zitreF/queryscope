@@ -9,6 +9,6 @@ public final class PrepareStatementAdvice {
 
     @Advice.OnMethodExit(suppress = Throwable.class)
     public static void exit(@Advice.Argument(0) String sql, @Advice.Return Object statement) {
-        RequestTracer.statementPrepared(statement, sql);
+        UnitTracer.statementPrepared(statement, sql);
     }
 }

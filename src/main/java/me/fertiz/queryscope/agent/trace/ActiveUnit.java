@@ -12,7 +12,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-final class ActiveRequest {
+final class ActiveUnit {
 
     private static final String TASK_METHOD = "TASK";
     private static final ClassLoadingMXBean CLASSES = ManagementFactory.getClassLoadingMXBean();
@@ -23,12 +23,12 @@ final class ActiveRequest {
     private final UnitKind kind;
     private final String method;
     private final String path;
-    private final boolean background;
+    private final boolean startedByQuery;
     private final Instant startedAt = Instant.now();
     private final long startedNanos = System.nanoTime();
     private final long classesAtStart = CLASSES.getTotalLoadedClassCount();
     private final long threadId = Thread.currentThread().getId();
-    private final List<QueryRecord> queries = new ArrayList<>();
+    private final List<LiveQuery> queries = new ArrayList<>();
     private final CallTreeBuilder calls = CallTracer.unitStarted(startedNanos);
     private int queryDepth;
     private long queryStartedNanos;
@@ -36,35 +36,35 @@ final class ActiveRequest {
     private int omittedQueries;
     private long omittedNanos;
 
-    private ActiveRequest(long id, UnitKind kind, String method, String path, boolean background) {
+    private ActiveUnit(long id, UnitKind kind, String method, String path, boolean startedByQuery) {
         this.id = id;
         this.kind = kind;
         this.method = method;
         this.path = path;
-        this.background = background;
+        this.startedByQuery = startedByQuery;
     }
 
-    static ActiveRequest http(long id, String method, String path) {
-        return new ActiveRequest(id, UnitKind.HTTP, method, path, false);
+    static ActiveUnit http(long id, String method, String path) {
+        return new ActiveUnit(id, UnitKind.HTTP, method, path, false);
     }
 
-    static ActiveRequest entry(long id, String name) {
-        return new ActiveRequest(id, UnitKind.TASK, TASK_METHOD, name, false);
+    static ActiveUnit entry(long id, String name) {
+        return new ActiveUnit(id, UnitKind.TASK, TASK_METHOD, name, false);
     }
 
-    static ActiveRequest background(long id, String name) {
-        return new ActiveRequest(id, UnitKind.TASK, TASK_METHOD, name, true);
+    static ActiveUnit startedByQuery(long id, String name) {
+        return new ActiveUnit(id, UnitKind.TASK, TASK_METHOD, name, true);
     }
 
-    boolean isBackground() {
-        return background;
+    boolean isStartedByQuery() {
+        return startedByQuery;
     }
 
     boolean isBetweenQueries() {
         return queryDepth == 0;
     }
 
-    boolean isExpired(long nanos) {
+    boolean isIdleOrFull(long nanos) {
         return queryDepth == 0
                 && (nanos - queryFinishedNanos > BACKGROUND_IDLE_NANOS || !hasRoomForQueries());
     }
@@ -92,8 +92,8 @@ final class ActiveRequest {
         return true;
     }
 
-    QueryRecord addQuery(String sql, String parameters, boolean failed, String callSite) {
-        QueryRecord query = new QueryRecord(sql, parameters, queryStartedNanos - startedNanos,
+    LiveQuery addQuery(String sql, String parameters, boolean failed, String callSite) {
+        LiveQuery query = new LiveQuery(sql, parameters, queryStartedNanos - startedNanos,
                 queryFinishedNanos - queryStartedNanos, callSite, failed);
         queries.add(query);
         CallTracer.queryAdded(calls, queries.size() - 1);
@@ -109,13 +109,13 @@ final class ActiveRequest {
         return Math.max(queryFinishedNanos, CallTracer.lastExitNanos(calls));
     }
 
-    RequestTrace finish(int status, long endNanos) {
+    UnitTrace finish(int status, long endNanos) {
         CallTree callTree = CallTracer.unitFinished(calls, endNanos);
         List<QueryExecution> executions = new ArrayList<>(queries.size());
-        for (QueryRecord query : queries) {
-            executions.add(query.toExecution());
+        for (LiveQuery query : queries) {
+            executions.add(query.snapshot());
         }
-        return new RequestTrace(
+        return new UnitTrace(
                 id, kind, method, path, status, startedAt, endNanos - startedNanos,
                 Collections.unmodifiableList(executions), callTree,
                 CLASSES.getTotalLoadedClassCount() - classesAtStart, threadId, omittedQueries, omittedNanos);

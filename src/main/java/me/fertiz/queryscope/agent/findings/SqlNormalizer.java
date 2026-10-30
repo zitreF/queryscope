@@ -15,23 +15,23 @@ public final class SqlNormalizer {
         while (index < sql.length()) {
             char current = sql.charAt(index);
             if (current == '\'') {
-                index = quoteEnd(sql, index);
+                index = indexAfterQuoted(sql, index);
                 normalized.append('?');
             } else if (current == '"' || current == '`') {
-                int end = quoteEnd(sql, index);
+                int end = indexAfterQuoted(sql, index);
                 normalized.append(sql, index, end);
                 index = end;
             } else if (sql.startsWith("--", index)) {
-                index = lineEnd(sql, index);
+                index = indexAfterLineComment(sql, index);
                 appendSpace(normalized);
             } else if (sql.startsWith("/*", index)) {
-                index = commentEnd(sql, index);
+                index = indexAfterBlockComment(sql, index);
                 appendSpace(normalized);
             } else if (Character.isWhitespace(current)) {
                 index++;
                 appendSpace(normalized);
             } else if (Character.isDigit(current) && !endsWithIdentifier(normalized)) {
-                index = skipNumber(sql, index);
+                index = indexAfterNumber(sql, index);
                 normalized.append('?');
             } else {
                 normalized.append(Character.toLowerCase(current));
@@ -42,7 +42,7 @@ public final class SqlNormalizer {
         return collapsed.endsWith(";") ? collapsed.substring(0, collapsed.length() - 1).trim() : collapsed;
     }
 
-    private static int quoteEnd(String sql, int start) {
+    private static int indexAfterQuoted(String sql, int start) {
         char quote = sql.charAt(start);
         int index = start + 1;
         while (index < sql.length()) {
@@ -57,17 +57,17 @@ public final class SqlNormalizer {
         return index;
     }
 
-    private static int lineEnd(String sql, int start) {
+    private static int indexAfterLineComment(String sql, int start) {
         int end = sql.indexOf('\n', start);
         return end < 0 ? sql.length() : end + 1;
     }
 
-    private static int commentEnd(String sql, int start) {
+    private static int indexAfterBlockComment(String sql, int start) {
         int end = sql.indexOf("*/", start + 2);
         return end < 0 ? sql.length() : end + 2;
     }
 
-    private static int skipNumber(String sql, int start) {
+    private static int indexAfterNumber(String sql, int start) {
         int index = start;
         while (index < sql.length() && (Character.isDigit(sql.charAt(index)) || sql.charAt(index) == '.')) {
             index++;

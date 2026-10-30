@@ -10,7 +10,7 @@ public final class RowAdvice {
     @Advice.OnMethodExit(suppress = Throwable.class)
     public static void exit(@Advice.This Object resultSet, @Advice.Return boolean hasRow) {
         if (hasRow) {
-            RequestTracer.rowRead(resultSet);
+            UnitTracer.rowRead(resultSet);
         }
     }
 }

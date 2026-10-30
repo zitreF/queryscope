@@ -9,6 +9,6 @@ public final class ConnectionReleaseAdvice {
 
     @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class)
     public static void exit() {
-        RequestTracer.connectionReleased();
+        UnitTracer.connectionReleased();
     }
 }

@@ -10,7 +10,7 @@ public final class ExecuteSqlAdvice {
 
     @Advice.OnMethodEnter(suppress = Throwable.class)
     public static void enter() {
-        RequestTracer.queryStarted();
+        UnitTracer.queryStarted();
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class)
@@ -19,6 +19,6 @@ public final class ExecuteSqlAdvice {
             @Advice.Return(typing = Assigner.Typing.DYNAMIC) Object result,
             @Advice.Thrown Throwable thrown
     ) {
-        RequestTracer.queryFinished(sql, thrown != null, result);
+        UnitTracer.queryFinished(sql, thrown != null, result);
     }
 }

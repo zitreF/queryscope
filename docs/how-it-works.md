@@ -75,7 +75,7 @@ system property `queryscope.panelPort`. The hub reads that property through the 
 the agent, so attaching twice, or attaching to an application that was started with `-javaagent`, finds the existing
 panel instead of loading a second agent.
 
-**The hub** (`HubCommand`, `HubServer`, `LocalProcesses`) is what `java -jar queryscope.jar` starts without
+**The hub** (`cli.HubCommand`, `HubServer`, `LocalProcesses`) is what `java -jar queryscope.jar` starts without
 an application. It lists the JVMs of the current user with `VirtualMachine.list()`, picks a free port for every agent
 it loads, and passes its own command line options on to them. `--attach=<pid>` does one attach from the command line.
 
@@ -117,7 +117,7 @@ The choices behind it:
 
 ## Units of work
 
-`RequestTracer` keeps the current unit of work of each thread in a `ThreadLocal<ActiveRequest>`.
+`UnitTracer` keeps the current unit of work of each thread in a `ThreadLocal<ActiveUnit>`.
 
 - **HTTP requests** start in `ServletAdvice` when a `REQUEST` dispatch enters the first `FilterChain.doFilter` or
   `HttpServlet.service` on the thread, and end when that call returns. Forwards, includes and nested filters land in
@@ -131,8 +131,8 @@ The choices behind it:
 - **Entry tasks** start and end with a method named by `entry=`, so a whole job is one unit however many connections
   it opens.
 
-An `ActiveRequest` records its start in wall-clock and monotonic time, its thread ID, the number of classes the JVM had
-loaded, its queries and its call tree. When it ends it becomes an immutable `RequestTrace`. Units that ran neither SQL
+An `ActiveUnit` records its start in wall-clock and monotonic time, its thread ID, the number of classes the JVM had
+loaded, its queries and its call tree. When it ends it becomes an immutable `UnitTrace`. Units that ran neither SQL
 nor any of your methods are dropped.
 
 ## Tracing queries
@@ -140,14 +140,15 @@ nor any of your methods are dropped.
 - **One query, one record.** Pools wrap the driver's statements in their own, so `HikariProxyPreparedStatement.execute`
   calls `JdbcPreparedStatement.execute`. A per-unit call depth counter counts only the outermost call.
 - **SQL of prepared statements.** `execute()` on a prepared statement carries no SQL. `PrepareStatementAdvice` stores
-  the SQL of every statement it returns in a `StatementState`, and `ParameterAdvice` adds each value bound with
+  the SQL of every statement it returns in a `BoundStatement`, and `ParameterAdvice` adds each value bound with
   `setXxx`, formatted by `ParameterValues`: strings quoted and cut at 64 characters, binary values as their size,
   `null` as `null`. The states live in a `WeakIdentityMap`, a map keyed by identity with weak references, so a
   statement the application drops is never kept alive by QueryScope.
 - **Rows.** A `ResultSet` returned by a query goes into the same kind of map, pointing at the query's record, and
   `RowAdvice` counts every `next()` that returns `true`.
 - **Call sites.** `StackWalker` finds the first frame outside the JDK, the agent, generated proxies and a list of known
-  framework, pool, driver and logging packages, which is the line of application code that ran the query.
+  framework, pool, driver and logging packages, which is the line of application code that ran the query. Packages
+  given with `package=` always count as application code, even inside a framework namespace.
 
 ## The call tree
 
@@ -292,19 +293,26 @@ GitHub Actions runs the same build on Temurin 25 for every push and pull request
 ## Code layout
 
 ```
-me.fertiz.queryscope.agent             QueryScopeAgent (premain, agentmain), AgentConfig, AgentInstaller
-├── trace                              requests and tasks with their SQL: RequestTracer, ActiveRequest,
-│                                      Servlets, the JDBC, servlet and entry advice, RequestTrace, QueryExecution
+me.fertiz.queryscope.agent             QueryScopeAgent (premain, agentmain), AgentInstaller
+├── config                             AgentConfig, AgentProperties (system properties shared with launcher and hub)
+├── appcode                            which classes are your code: AppPackages, CallSites
+├── trace                              requests and tasks with their SQL: UnitTracer, ActiveUnit, LiveQuery,
+│                                      BoundStatement, Servlets, the JDBC, servlet and entry advice, UnitTrace
 ├── calltree                           the call tree of your methods: CallTracer, CallTreeBuilder, MethodAdvice,
-│                                      CallSites, AppPackages, CallTree, CallNode
-├── findings                           QueryAnalyzer, SqlNormalizer, Thresholds and the finding records
+│                                      CallTree, CallNode
+├── findings                           QueryAnalyzer, SqlNormalizer, Thresholds, FindingKind and the finding records
 ├── profiler                           Sampling, JfrSampler, ThreadDumpSampler, SampleStore, Profile
 ├── console                            ConsoleReporter, SessionSummary, FindingText
 ├── panel                              PanelServer, ReportStore, ReportJson, ProfileJson, ProfileQuery
-├── hub                                HubCommand, HubServer, LocalProcesses, JavaProcess
+├── hub                                HubServer, LocalProcesses, JavaProcess
 ├── http                               LocalServer, HttpSupport, JsonWriter, Browser, shared by panel and hub
-└── launch                             QueryScopeLauncher, LaunchCommand
+└── cli                                QueryScopeLauncher (the jar's Main-Class), LaunchCommand, HubCommand
 ```
 
-The web pages live in `src/main/resources/me/fertiz/queryscope/agent/web`. The tests mirror the packages, and `src/test` also holds the demo shop (`demo`), a plain JDBC program (`plain`), a
-profiled fixture (`profiled`) and the end-to-end tests (`e2e`).
+Dependencies point one way, with no package cycles: `cli` uses `hub`, `http` and `config`; the agent's root package
+uses the feature packages; `panel`, `console`, `findings` and `trace` build on each other in that order; and
+`appcode`, `http` and `config` (apart from `findings.Thresholds`) depend on nothing else in QueryScope.
+
+The web pages live in `src/main/resources/me/fertiz/queryscope/agent/web`. The tests mirror the packages, and
+`src/test` also holds the demo shop (`demo`), a plain JDBC program (`plain`), a profiled fixture (`profiled`) and the
+end-to-end tests (`e2e`).

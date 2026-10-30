@@ -1,4 +1,4 @@
-package me.fertiz.queryscope.agent;
+package me.fertiz.queryscope.agent.config;
 
 import me.fertiz.queryscope.agent.findings.Thresholds;
 
@@ -66,24 +66,24 @@ public record AgentConfig(
             String value = keyAndValue.length == 2 ? keyAndValue[1].trim() : "";
             switch (key) {
                 case "port" -> {
-                    port = portNumber(value);
+                    port = parsePort(value);
                     portGiven = true;
                 }
-                case "nPlusOneThreshold" -> nPlusOneThreshold = positiveNumber(key, value);
-                case "slowQueryMs" -> slowQueryThreshold = Duration.ofMillis(positiveNumber(key, value));
-                case "largeResultRows" -> largeResultRows = positiveNumber(key, value);
-                case "maxQueries" -> maxQueries = positiveNumber(key, value);
-                case "slowMethodMs" -> slowMethodThreshold = Duration.ofMillis(positiveNumber(key, value));
-                case "entry" -> entryMethods.add(entryMethod(value));
-                case "package" -> packages.add(packageName(value));
-                case "profile" -> callTree = flag(key, value);
-                case "sampling" -> sampling = flag(key, value);
-                case "sampleMs" -> sampleInterval = Duration.ofMillis(sampleMillis(value));
-                case "open" -> openPanel = flag(key, value);
-                case "summary" -> printSummary = flag(key, value);
+                case "nPlusOneThreshold" -> nPlusOneThreshold = parsePositiveInt(key, value);
+                case "slowQueryMs" -> slowQueryThreshold = Duration.ofMillis(parsePositiveInt(key, value));
+                case "largeResultRows" -> largeResultRows = parsePositiveInt(key, value);
+                case "maxQueries" -> maxQueries = parsePositiveInt(key, value);
+                case "slowMethodMs" -> slowMethodThreshold = Duration.ofMillis(parsePositiveInt(key, value));
+                case "entry" -> entryMethods.add(parseEntryMethod(value));
+                case "package" -> packages.add(parsePackageName(value));
+                case "callTree", "profile" -> callTree = parseFlag(key, value);
+                case "sampling" -> sampling = parseFlag(key, value);
+                case "sampleMs" -> sampleInterval = Duration.ofMillis(parseSampleMillis(value));
+                case "open" -> openPanel = parseFlag(key, value);
+                case "summary" -> printSummary = parseFlag(key, value);
                 default -> throw new IllegalArgumentException("Unknown QueryScope option '" + key
                         + "', known options are port, nPlusOneThreshold, slowQueryMs, largeResultRows, maxQueries,"
-                        + " slowMethodMs, entry, package, profile, sampling, sampleMs, open and summary");
+                        + " slowMethodMs, entry, package, callTree, sampling, sampleMs, open and summary");
             }
         }
         return new AgentConfig(port, portGiven, nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries,
@@ -94,7 +94,7 @@ public record AgentConfig(
         return new Thresholds(nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries, slowMethodThreshold);
     }
 
-    private static String entryMethod(String value) {
+    private static String parseEntryMethod(String value) {
         if (!ENTRY_METHOD.matcher(value).matches()) {
             throw new IllegalArgumentException(
                     "QueryScope option entry needs a class and a method like com.acme.ImportJob#run, got '" + value + "'");
@@ -102,8 +102,8 @@ public record AgentConfig(
         return value;
     }
 
-    private static int sampleMillis(String value) {
-        int millis = positiveNumber("sampleMs", value);
+    private static int parseSampleMillis(String value) {
+        int millis = parsePositiveInt("sampleMs", value);
         if (millis > MAX_SAMPLE_MILLIS) {
             throw new IllegalArgumentException(
                     "QueryScope option sampleMs must be at most " + MAX_SAMPLE_MILLIS + ", got " + millis);
@@ -111,7 +111,7 @@ public record AgentConfig(
         return millis;
     }
 
-    private static String packageName(String value) {
+    private static String parsePackageName(String value) {
         if (!PACKAGE.matcher(value).matches()) {
             throw new IllegalArgumentException(
                     "QueryScope option package needs a Java package like com.acme.shop, got '" + value + "'");
@@ -119,7 +119,7 @@ public record AgentConfig(
         return value;
     }
 
-    public static boolean flag(String key, String value) {
+    public static boolean parseFlag(String key, String value) {
         return switch (value) {
             case "", "true" -> true;
             case "false" -> false;
@@ -128,15 +128,15 @@ public record AgentConfig(
         };
     }
 
-    public static int portNumber(String value) {
-        int port = positiveNumber("port", value);
+    public static int parsePort(String value) {
+        int port = parsePositiveInt("port", value);
         if (port > 65535) {
             throw new IllegalArgumentException("QueryScope option port must be at most 65535, got " + port);
         }
         return port;
     }
 
-    private static int positiveNumber(String key, String value) {
+    private static int parsePositiveInt(String key, String value) {
         if (!POSITIVE_NUMBER.matcher(value).matches()) {
             throw new IllegalArgumentException(
                     "QueryScope option " + key + " needs a positive number, got '" + value + "'");

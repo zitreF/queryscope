@@ -3,7 +3,7 @@ package me.fertiz.queryscope.agent.findings;
 import me.fertiz.queryscope.agent.calltree.CallNode;
 import me.fertiz.queryscope.agent.calltree.CallTree;
 import me.fertiz.queryscope.agent.trace.QueryExecution;
-import me.fertiz.queryscope.agent.trace.RequestTrace;
+import me.fertiz.queryscope.agent.trace.UnitTrace;
 import me.fertiz.queryscope.agent.trace.UnitKind;
 import org.junit.jupiter.api.Test;
 
@@ -122,7 +122,7 @@ class QueryAnalyzerTest {
     @Test
     void countsQueriesThatWereNotRecordedTowardsTooManyQueries() {
         List<QueryExecution> queries = List.of(query("select * from orders", SERVICE, 2));
-        RequestTrace trace = new RequestTrace(1, UnitKind.HTTP, "GET", "/import", 200, Instant.now(),
+        UnitTrace trace = new UnitTrace(1, UnitKind.HTTP, "GET", "/import", 200, Instant.now(),
                 Duration.ofMillis(50).toNanos(), queries, CallTree.EMPTY, 0, 1, 40, Duration.ofMillis(8).toNanos());
 
         TooManyQueries expected = new TooManyQueries(41, 10, Duration.ofMillis(10).toNanos(),
@@ -137,7 +137,7 @@ class QueryAnalyzerTest {
         CallNode service = node("com.acme.OrderService.summaries", 1, 200, 140, false, List.of(0), mapperInService);
         CallNode mapperInJob = node("com.acme.OrderMapper.toDto", 10, 30, 30, false, List.of());
         CallNode job = node("com.acme.ImportJob.run", 1, 330, 100, true, List.of(), service, mapperInJob);
-        RequestTrace trace = new RequestTrace(1, UnitKind.TASK, "TASK", "ImportJob.run", 0, Instant.now(),
+        UnitTrace trace = new UnitTrace(1, UnitKind.TASK, "TASK", "ImportJob.run", 0, Instant.now(),
                 Duration.ofMillis(330).toNanos(), queries, new CallTree(List.of(job), List.of(), false), 0, 1, 0, 0);
 
         List<Finding> findings = analyzer.analyze(trace).findings();
@@ -152,15 +152,15 @@ class QueryAnalyzerTest {
     @Test
     void leavesSlowMethodsOutWhileTheJvmIsStillWarmingUp() {
         CallNode render = node("com.acme.ReportService.render", 1, 400, 400, false, List.of());
-        RequestTrace trace = new RequestTrace(1, UnitKind.HTTP, "GET", "/report", 200, Instant.now(),
+        UnitTrace trace = new UnitTrace(1, UnitKind.HTTP, "GET", "/report", 200, Instant.now(),
                 Duration.ofMillis(400).toNanos(), List.of(), new CallTree(List.of(render), List.of(), false),
-                RequestTrace.WARM_UP_CLASSES, 1, 0, 0);
+                UnitTrace.WARM_UP_CLASSES, 1, 0, 0);
 
         assertEquals(List.of(), analyzer.analyze(trace).findings());
     }
 
     private List<Finding> analyze(List<QueryExecution> queries) {
-        RequestTrace trace = new RequestTrace(1, UnitKind.HTTP, "GET", "/orders", 200, Instant.now(),
+        UnitTrace trace = new UnitTrace(1, UnitKind.HTTP, "GET", "/orders", 200, Instant.now(),
                 Duration.ofMillis(50).toNanos(), queries);
         return analyzer.analyze(trace).findings();
     }

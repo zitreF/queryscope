@@ -1,7 +1,6 @@
-package me.fertiz.queryscope.agent.launch;
+package me.fertiz.queryscope.agent.cli;
 
-import me.fertiz.queryscope.agent.AgentConfig;
-import me.fertiz.queryscope.agent.hub.HubCommand;
+import me.fertiz.queryscope.agent.config.AgentConfig;
 
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
@@ -39,7 +38,7 @@ public final class QueryScopeLauncher {
               --slowMethodMs=100          methods spending at least this long in their own code are reported
               --package=com.acme          package whose methods go into the call tree, can be repeated,
                                           by default the package of the application's main class
-              --profile=false             turns the call tree off
+              --callTree=false            turns the call tree off
               --sampleMs=10               how often the sampling profiler takes a stack sample
               --sampling=false            turns the sampling profiler off
               --entry=com.acme.Job#run    method whose call becomes one task, can be repeated
@@ -53,18 +52,18 @@ public final class QueryScopeLauncher {
     }
 
     public static void main(String[] arguments) throws Exception {
-        LaunchCommand command = orUsage(() -> LaunchCommand.parse(arguments));
+        LaunchCommand command = parseOrExitWithUsage(() -> LaunchCommand.parse(arguments));
         if (command.agentOptions().contains(HELP)) {
             System.out.print(USAGE);
         } else if (command.target().isEmpty()) {
-            runHub(orUsage(() -> HubCommand.parse(command.agentOptions())));
+            runHub(parseOrExitWithUsage(() -> HubCommand.parse(command.agentOptions())));
         } else {
-            orUsage(() -> AgentConfig.parse(command.agentOptionString()));
+            parseOrExitWithUsage(() -> AgentConfig.parse(command.agentOptionString()));
             runApplication(command);
         }
     }
 
-    private static <T> T orUsage(Supplier<T> parse) {
+    private static <T> T parseOrExitWithUsage(Supplier<T> parse) {
         try {
             return parse.get();
         } catch (IllegalArgumentException e) {
@@ -77,11 +76,12 @@ public final class QueryScopeLauncher {
     }
 
     private static void runApplication(LaunchCommand command) throws Exception {
-        Process application = new ProcessBuilder(command.processCommand(
-                javaExecutable(), agentJar(), jvmOptions(), ProcessHandle.current().pid()))
+        Process application = new ProcessBuilder(command.applicationCommand(
+                javaExecutable(), agentJar(), inheritedJvmOptions(), ProcessHandle.current().pid()))
                 .inheritIO()
                 .start();
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> stop(application), "queryscope-launcher-stop"));
+        Runtime.getRuntime().addShutdownHook(
+                new Thread(() -> stopApplication(application), "queryscope-launcher-stop"));
         System.exit(application.waitFor());
     }
 
@@ -98,7 +98,7 @@ public final class QueryScopeLauncher {
         }
     }
 
-    private static void stop(Process application) {
+    private static void stopApplication(Process application) {
         if (!application.isAlive()) {
             return;
         }
@@ -124,7 +124,7 @@ public final class QueryScopeLauncher {
         return Path.of(QueryScopeLauncher.class.getProtectionDomain().getCodeSource().getLocation().toURI());
     }
 
-    private static List<String> jvmOptions() {
+    private static List<String> inheritedJvmOptions() {
         RuntimeMXBean runtime = ManagementFactory.getRuntimeMXBean();
         return LaunchCommand.withDeepJfrStacks(runtime.getInputArguments(), runtime.getVmName());
     }

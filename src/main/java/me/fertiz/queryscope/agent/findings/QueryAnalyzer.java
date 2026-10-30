@@ -2,7 +2,7 @@ package me.fertiz.queryscope.agent.findings;
 
 import me.fertiz.queryscope.agent.calltree.CallNode;
 import me.fertiz.queryscope.agent.trace.QueryExecution;
-import me.fertiz.queryscope.agent.trace.RequestTrace;
+import me.fertiz.queryscope.agent.trace.UnitTrace;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -27,16 +27,18 @@ public final class QueryAnalyzer {
         this.thresholds = thresholds;
     }
 
-    public RequestReport analyze(RequestTrace trace) {
+    public UnitReport analyze(UnitTrace trace) {
         List<QueryExecution> queries = trace.queries();
-        List<String> statements = queries.stream().map(query -> SqlNormalizer.normalize(query.sql())).toList();
-        Map<String, List<Integer>> reads = byStatement(statements, READS);
+        List<String> normalizedStatements = queries.stream()
+                .map(query -> SqlNormalizer.normalize(query.sql()))
+                .toList();
+        Map<String, List<Integer>> reads = indexesByStatement(normalizedStatements, READS);
         List<Finding> findings = new ArrayList<>();
-        findings.addAll(nPlusOnes(queries, statements, reads));
-        findings.addAll(repeatedWrites(queries, statements));
-        findings.addAll(duplicates(queries, statements, reads));
-        findings.addAll(slowQueries(queries, statements));
-        findings.addAll(largeResults(queries, statements));
+        findings.addAll(nPlusOnes(queries, normalizedStatements, reads));
+        findings.addAll(repeatedWrites(queries, normalizedStatements));
+        findings.addAll(duplicates(queries, normalizedStatements, reads));
+        findings.addAll(slowQueries(queries, normalizedStatements));
+        findings.addAll(largeResults(queries, normalizedStatements));
         if (!trace.isWarmUp()) {
             findings.addAll(slowMethods(trace));
         }
@@ -44,64 +46,65 @@ public final class QueryAnalyzer {
             findings.add(new TooManyQueries(trace.queryCount(), thresholds.maxQueries(), trace.databaseNanos(),
                     trace.durationNanos()));
         }
-        return new RequestReport(trace, List.copyOf(findings));
+        return new UnitReport(trace, List.copyOf(findings));
     }
 
-    private List<NPlusOne> nPlusOnes(List<QueryExecution> queries, List<String> statements,
+    private List<NPlusOne> nPlusOnes(List<QueryExecution> queries, List<String> normalizedStatements,
                                      Map<String, List<Integer>> reads) {
-        return atLeast(reads.values(), thresholds.repeatedStatements()).stream()
-                .map(indexes -> new NPlusOne(statements.get(indexes.get(0)), mostCommonCallSite(queries, indexes),
-                        indexes, totalNanos(queries, indexes)))
+        return groupsOfAtLeast(reads.values(), thresholds.repeatedStatements()).stream()
+                .map(indexes -> new NPlusOne(normalizedStatements.get(indexes.get(0)),
+                        mostCommonCallSite(queries, indexes), indexes, totalNanos(queries, indexes)))
                 .toList();
     }
 
-    private List<RepeatedWrite> repeatedWrites(List<QueryExecution> queries, List<String> statements) {
-        return atLeast(byStatement(statements, WRITES).values(), thresholds.repeatedStatements()).stream()
-                .map(indexes -> new RepeatedWrite(statements.get(indexes.get(0)), mostCommonCallSite(queries, indexes),
-                        indexes, totalNanos(queries, indexes)))
+    private List<RepeatedWrite> repeatedWrites(List<QueryExecution> queries, List<String> normalizedStatements) {
+        Map<String, List<Integer>> writes = indexesByStatement(normalizedStatements, WRITES);
+        return groupsOfAtLeast(writes.values(), thresholds.repeatedStatements()).stream()
+                .map(indexes -> new RepeatedWrite(normalizedStatements.get(indexes.get(0)),
+                        mostCommonCallSite(queries, indexes), indexes, totalNanos(queries, indexes)))
                 .toList();
     }
 
-    private List<DuplicateQuery> duplicates(List<QueryExecution> queries, List<String> statements,
+    private List<DuplicateQuery> duplicates(List<QueryExecution> queries, List<String> normalizedStatements,
                                             Map<String, List<Integer>> reads) {
         Map<List<String>, List<Integer>> identical = new LinkedHashMap<>();
         for (int index = 0; index < queries.size(); index++) {
-            List<Integer> sameStatement = reads.get(statements.get(index));
+            List<Integer> sameStatement = reads.get(normalizedStatements.get(index));
             if (sameStatement != null && sameStatement.size() < thresholds.repeatedStatements()) {
                 QueryExecution query = queries.get(index);
                 identical.computeIfAbsent(List.of(query.sql(), query.parameters()), key -> new ArrayList<>()).add(index);
             }
         }
-        return atLeast(identical.values(), DUPLICATE_THRESHOLD).stream()
-                .map(indexes -> new DuplicateQuery(statements.get(indexes.get(0)),
+        return groupsOfAtLeast(identical.values(), DUPLICATE_THRESHOLD).stream()
+                .map(indexes -> new DuplicateQuery(normalizedStatements.get(indexes.get(0)),
                         queries.get(indexes.get(0)).parameters(), mostCommonCallSite(queries, indexes), indexes))
                 .toList();
     }
 
-    private List<SlowQuery> slowQueries(List<QueryExecution> queries, List<String> statements) {
+    private List<SlowQuery> slowQueries(List<QueryExecution> queries, List<String> normalizedStatements) {
         long slowNanos = thresholds.slowQuery().toNanos();
         List<SlowQuery> slow = new ArrayList<>();
         for (int index = 0; index < queries.size(); index++) {
             if (queries.get(index).durationNanos() >= slowNanos) {
-                slow.add(new SlowQuery(index, statements.get(index), queries.get(index)));
+                slow.add(new SlowQuery(index, normalizedStatements.get(index), queries.get(index)));
             }
         }
         return slow;
     }
 
-    private List<LargeResult> largeResults(List<QueryExecution> queries, List<String> statements) {
+    private List<LargeResult> largeResults(List<QueryExecution> queries, List<String> normalizedStatements) {
         List<LargeResult> large = new ArrayList<>();
         for (int index = 0; index < queries.size(); index++) {
             if (queries.get(index).rows() >= thresholds.largeResultRows()) {
-                large.add(new LargeResult(index, statements.get(index), queries.get(index)));
+                large.add(new LargeResult(index, normalizedStatements.get(index), queries.get(index)));
             }
         }
         return large;
     }
 
-    private List<SlowMethod> slowMethods(RequestTrace trace) {
+    private List<SlowMethod> slowMethods(UnitTrace trace) {
         Map<String, OwnTime> methods = new LinkedHashMap<>();
-        collectOwnTime(trace.callTree().calls(), trace.queries(), methods);
+        collectOwnTime(trace.callTree().topLevelCalls(), trace.queries(), methods);
         long thresholdNanos = thresholds.slowMethod().toNanos();
         return methods.entrySet().stream()
                 .filter(entry -> entry.getValue().nanos() >= thresholdNanos)
@@ -123,10 +126,11 @@ public final class QueryAnalyzer {
         }
     }
 
-    private static Map<String, List<Integer>> byStatement(List<String> statements, List<String> keywords) {
+    private static Map<String, List<Integer>> indexesByStatement(List<String> normalizedStatements,
+                                                                 List<String> keywords) {
         Map<String, List<Integer>> groups = new LinkedHashMap<>();
-        for (int index = 0; index < statements.size(); index++) {
-            String statement = statements.get(index);
+        for (int index = 0; index < normalizedStatements.size(); index++) {
+            String statement = normalizedStatements.get(index);
             if (keywords.stream().anyMatch(statement::startsWith)) {
                 groups.computeIfAbsent(statement, key -> new ArrayList<>()).add(index);
             }
@@ -134,7 +138,7 @@ public final class QueryAnalyzer {
         return groups;
     }
 
-    private static List<List<Integer>> atLeast(Collection<List<Integer>> groups, int threshold) {
+    private static List<List<Integer>> groupsOfAtLeast(Collection<List<Integer>> groups, int threshold) {
         return groups.stream()
                 .filter(indexes -> indexes.size() >= threshold)
                 .sorted(Comparator.comparingInt(List<Integer>::size).reversed())

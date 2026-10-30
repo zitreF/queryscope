@@ -27,37 +27,37 @@ public final class HttpSupport {
     private HttpSupport() {
     }
 
-    public static HttpHandler assets(Map<String, String> filesByPath) {
+    public static HttpHandler staticFiles(Map<String, String> filesByPath) {
         Map<String, Asset> assets = new HashMap<>();
         filesByPath.forEach((path, file) -> assets.put(path, Asset.load(file)));
         return exchange -> {
             Asset asset = assets.get(exchange.getRequestURI().getPath());
             if (asset == null) {
-                status(exchange, 404);
-            } else if (allow(exchange, "GET")) {
+                sendStatus(exchange, 404);
+            } else if (requireMethod(exchange, "GET")) {
                 exchange.getResponseHeaders().set("Cache-Control", "no-cache");
                 exchange.getResponseHeaders().set("X-Frame-Options", "DENY");
                 exchange.getResponseHeaders().set("Content-Security-Policy", "frame-ancestors 'none'");
-                send(exchange, 200, asset.type(), asset.content());
+                sendBytes(exchange, 200, asset.type(), asset.content());
             }
         };
     }
 
-    public static boolean allow(HttpExchange exchange, String method) throws IOException {
+    public static boolean requireMethod(HttpExchange exchange, String method) throws IOException {
         if (exchange.getRequestMethod().equals(method)) {
             return true;
         }
-        status(exchange, 405);
+        sendStatus(exchange, 405);
         return false;
     }
 
-    public static void status(HttpExchange exchange, int status) throws IOException {
+    public static void sendStatus(HttpExchange exchange, int status) throws IOException {
         exchange.sendResponseHeaders(status, -1);
         exchange.close();
     }
 
     public static void respond(HttpExchange exchange, int status, String contentType, String body) throws IOException {
-        send(exchange, status, contentType, body.getBytes(StandardCharsets.UTF_8));
+        sendBytes(exchange, status, contentType, body.getBytes(StandardCharsets.UTF_8));
     }
 
     public static boolean sameOrigin(HttpExchange exchange) {
@@ -66,17 +66,18 @@ public final class HttpSupport {
         return origin == null || origin.equals("http://" + host);
     }
 
-    static HttpHandler localOnly(HttpHandler handler) {
+    static HttpHandler localhostOnly(HttpHandler handler) {
         return exchange -> {
             if (LOCAL_HOSTS.contains(hostName(exchange.getRequestHeaders().getFirst("Host")))) {
                 handler.handle(exchange);
             } else {
-                status(exchange, 403);
+                sendStatus(exchange, 403);
             }
         };
     }
 
-    private static void send(HttpExchange exchange, int status, String contentType, byte[] body) throws IOException {
+    private static void sendBytes(HttpExchange exchange, int status, String contentType, byte[] body)
+            throws IOException {
         exchange.getResponseHeaders().set("Content-Type", contentType);
         exchange.sendResponseHeaders(status, body.length == 0 ? -1 : body.length);
         try (OutputStream out = exchange.getResponseBody()) {

@@ -40,7 +40,7 @@ class AttachEndToEndTest {
 
             JsonNode report = QueryScopeEndToEndTest.reportFor(panelPort, "/api/customers/naive");
             assertTrue(report.path("findings").toString().contains("\"type\":\"nPlusOne\""), report.toString());
-            assertTrue(report.path("methods").asInt() > 0, report.toString());
+            assertTrue(report.path("methodCount").asInt() > 0, report.toString());
             assertTrue(demo.output().contains("QueryScope panel is running at http://localhost:" + panelPort),
                     demo.output());
         }

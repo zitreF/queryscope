@@ -1,8 +1,10 @@
-package me.fertiz.queryscope.agent.hub;
+package me.fertiz.queryscope.agent.cli;
 
-import me.fertiz.queryscope.agent.AgentConfig;
+import me.fertiz.queryscope.agent.config.AgentConfig;
 import me.fertiz.queryscope.agent.http.Browser;
 import me.fertiz.queryscope.agent.http.LocalServer;
+import me.fertiz.queryscope.agent.hub.HubServer;
+import me.fertiz.queryscope.agent.hub.LocalProcesses;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -33,11 +35,11 @@ public record HubCommand(int port, boolean portGiven, boolean openBrowser, long 
             String value = keyAndValue.length == 2 ? keyAndValue[1] : "";
             switch (keyAndValue[0]) {
                 case "port" -> {
-                    port = AgentConfig.portNumber(value);
+                    port = AgentConfig.parsePort(value);
                     portGiven = true;
                 }
-                case "open" -> openBrowser = AgentConfig.flag("open", value);
-                case "attach" -> attachPid = processId(value);
+                case "open" -> openBrowser = AgentConfig.parseFlag("open", value);
+                case "attach" -> attachPid = parseProcessId(value);
                 default -> agentOptions.add(option);
             }
         }
@@ -62,7 +64,7 @@ public record HubCommand(int port, boolean portGiven, boolean openBrowser, long 
         new CountDownLatch(1).await();
     }
 
-    private static long processId(String value) {
+    private static long parseProcessId(String value) {
         if (!PROCESS_ID.matcher(value).matches()) {
             throw new IllegalArgumentException("QueryScope option attach needs a process id, got '" + value + "'");
         }

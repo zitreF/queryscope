@@ -13,7 +13,7 @@ public final class Browser {
 
     public static void open(String url) {
         try {
-            new ProcessBuilder(command(url))
+            new ProcessBuilder(openCommand(url))
                     .redirectErrorStream(true)
                     .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                     .start();
@@ -22,7 +22,7 @@ public final class Browser {
         }
     }
 
-    static List<String> command(String url) {
+    static List<String> openCommand(String url) {
         String system = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         if (system.contains("win")) {
             return List.of("rundll32", "url.dll,FileProtocolHandler", url);

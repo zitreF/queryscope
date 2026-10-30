@@ -1,6 +1,6 @@
 package me.fertiz.queryscope.agent.panel;
 
-import me.fertiz.queryscope.agent.calltree.AppPackages;
+import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.http.LocalServer;
 import me.fertiz.queryscope.agent.profiler.SampleStore;
 import org.junit.jupiter.api.AfterEach;
@@ -87,7 +87,7 @@ class PanelServerTest {
 
     @Test
     void servesAFlameGraphOfTheSampledStacks() throws Exception {
-        samples.started("JDK Flight Recorder", Duration.ofMillis(10));
+        samples.markStarted("JDK Flight Recorder", Duration.ofMillis(10));
         samples.add(System.currentTimeMillis(), 1, "main", true, false,
                 List.of("java.lang.Thread.run", "com.acme.Report.render"));
 
@@ -114,7 +114,7 @@ class PanelServerTest {
             assertEquals("", lines.next());
             store.add(Reports.plain(3, "/live"));
             assertEquals("event: request", lines.next());
-            assertEquals("data: " + ReportJson.event(Reports.plain(3, "/live")), lines.next());
+            assertEquals("data: " + ReportJson.reportToJson(Reports.plain(3, "/live")), lines.next());
         });
         assertEquals("text/event-stream; charset=utf-8", events.headers().firstValue("Content-Type").orElseThrow());
     }

@@ -120,7 +120,7 @@ class QueryScopeEndToEndTest {
         JsonNode report = requestAndReport("/api/status");
 
         assertEquals(0, report.path("queries").size());
-        assertEquals(1, report.path("methods").asInt());
+        assertEquals(1, report.path("methodCount").asInt());
     }
 
     @Test

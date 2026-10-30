@@ -1,6 +1,6 @@
 package me.fertiz.queryscope.agent.panel;
 
-import me.fertiz.queryscope.agent.findings.RequestReport;
+import me.fertiz.queryscope.agent.findings.UnitReport;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -37,7 +37,7 @@ class ReportStoreTest {
 
     @Test
     void notifiesSubscribersUntilTheyUnsubscribe() {
-        List<RequestReport> received = new ArrayList<>();
+        List<UnitReport> received = new ArrayList<>();
         Runnable unsubscribe = store.subscribe(received::add);
 
         store.add(Reports.plain(1, "/a"));

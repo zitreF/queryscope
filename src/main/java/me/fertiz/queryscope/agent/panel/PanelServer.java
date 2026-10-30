@@ -1,8 +1,8 @@
 package me.fertiz.queryscope.agent.panel;
 
 import com.sun.net.httpserver.HttpExchange;
-import me.fertiz.queryscope.agent.calltree.AppPackages;
-import me.fertiz.queryscope.agent.findings.RequestReport;
+import me.fertiz.queryscope.agent.appcode.AppPackages;
+import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.http.HttpSupport;
 import me.fertiz.queryscope.agent.http.LocalServer;
 import me.fertiz.queryscope.agent.profiler.Profile;
@@ -21,9 +21,9 @@ import java.util.regex.Pattern;
 
 import static me.fertiz.queryscope.agent.http.HttpSupport.JSON;
 import static me.fertiz.queryscope.agent.http.HttpSupport.TEXT;
-import static me.fertiz.queryscope.agent.http.HttpSupport.allow;
+import static me.fertiz.queryscope.agent.http.HttpSupport.requireMethod;
 import static me.fertiz.queryscope.agent.http.HttpSupport.respond;
-import static me.fertiz.queryscope.agent.http.HttpSupport.status;
+import static me.fertiz.queryscope.agent.http.HttpSupport.sendStatus;
 
 public final class PanelServer {
 
@@ -52,7 +52,7 @@ public final class PanelServer {
                                     AppPackages application, SampleStore samples) throws IOException {
         PanelServer panel = new PanelServer(store, callTreePackages, application, samples);
         return LocalServer.start(port, portGiven, "queryscope-panel", Map.of(
-                "/", HttpSupport.assets(ASSETS),
+                "/", HttpSupport.staticFiles(ASSETS),
                 "/api/requests", panel::serveRequests,
                 "/api/profile", panel::serveProfile,
                 "/api/events", panel::streamEvents));
@@ -65,34 +65,34 @@ public final class PanelServer {
             return;
         }
         switch (exchange.getRequestMethod()) {
-            case "GET" -> respond(exchange, 200, JSON, ReportJson.list(store.newestFirst()));
+            case "GET" -> respond(exchange, 200, JSON, ReportJson.reportsToJson(store.newestFirst()));
             case "DELETE" -> {
                 store.clear();
-                status(exchange, 204);
+                sendStatus(exchange, 204);
             }
-            default -> status(exchange, 405);
+            default -> sendStatus(exchange, 405);
         }
     }
 
     private void serveCalls(HttpExchange exchange, String path) throws IOException {
         Matcher calls = CALLS_PATH.matcher(path);
         if (!calls.matches()) {
-            status(exchange, 404);
+            sendStatus(exchange, 404);
             return;
         }
-        if (!allow(exchange, "GET")) {
+        if (!requireMethod(exchange, "GET")) {
             return;
         }
-        Optional<RequestReport> report = store.find(Long.parseLong(calls.group(1)));
+        Optional<UnitReport> report = store.find(Long.parseLong(calls.group(1)));
         if (report.isEmpty()) {
-            status(exchange, 404);
+            sendStatus(exchange, 404);
         } else {
-            respond(exchange, 200, JSON, ReportJson.calls(report.get(), callTreePackages.names()));
+            respond(exchange, 200, JSON, ReportJson.callTreeToJson(report.get(), callTreePackages.names()));
         }
     }
 
     private void serveProfile(HttpExchange exchange) throws IOException {
-        if (!allow(exchange, "GET")) {
+        if (!requireMethod(exchange, "GET")) {
             return;
         }
         Optional<Profile.Filter> filter;
@@ -103,24 +103,26 @@ public final class PanelServer {
             return;
         }
         if (filter.isEmpty()) {
-            status(exchange, 404);
+            sendStatus(exchange, 404);
             return;
         }
         Profile profile = Profile.build(samples, application, filter.get());
-        respond(exchange, 200, JSON, ProfileJson.of(profile, samples, filter.get(), application.names()));
+        respond(exchange, 200, JSON, ProfileJson.profileToJson(profile, samples, filter.get(), application.names()));
     }
 
     private void streamEvents(HttpExchange exchange) throws IOException {
         exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
         exchange.getResponseHeaders().set("Cache-Control", "no-cache");
         exchange.sendResponseHeaders(200, 0);
-        BlockingQueue<RequestReport> pending = new LinkedBlockingQueue<>(MAX_PENDING_EVENTS);
+        BlockingQueue<UnitReport> pending = new LinkedBlockingQueue<>(MAX_PENDING_EVENTS);
         Runnable unsubscribe = store.subscribe(pending::offer);
         try (OutputStream body = exchange.getResponseBody()) {
-            send(body, ": connected\n\n");
+            writeEvent(body, ": connected\n\n");
             while (true) {
-                RequestReport report = pending.poll(HEARTBEAT_SECONDS, TimeUnit.SECONDS);
-                send(body, report == null ? ": heartbeat\n\n" : "event: request\ndata: " + ReportJson.event(report) + "\n\n");
+                UnitReport report = pending.poll(HEARTBEAT_SECONDS, TimeUnit.SECONDS);
+                writeEvent(body, report == null
+                        ? ": heartbeat\n\n"
+                        : "event: request\ndata: " + ReportJson.reportToJson(report) + "\n\n");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -129,7 +131,7 @@ public final class PanelServer {
         }
     }
 
-    private static void send(OutputStream body, String event) throws IOException {
+    private static void writeEvent(OutputStream body, String event) throws IOException {
         body.write(event.getBytes(StandardCharsets.UTF_8));
         body.flush();
     }

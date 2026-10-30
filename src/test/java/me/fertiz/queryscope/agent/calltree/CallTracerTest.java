@@ -31,7 +31,7 @@ class CallTracerTest {
         CallTracer.methodExited(service);
         CallTree result = CallTracer.unitFinished(tree, System.nanoTime());
 
-        CallNode summaries = single(result.calls());
+        CallNode summaries = single(result.topLevelCalls());
         CallNode toDto = single(summaries.children());
         assertEquals(SERVICE, summaries.method());
         assertEquals(1, summaries.calls());
@@ -50,7 +50,7 @@ class CallTracerTest {
         CallTracer.queryAdded(tree, 0);
         CallTree result = CallTracer.unitFinished(tree, System.nanoTime());
 
-        assertEquals(List.of(), result.calls());
+        assertEquals(List.of(), result.topLevelCalls());
         assertEquals(List.of(0), result.outsideQueryIndexes());
     }
 
@@ -63,7 +63,7 @@ class CallTracerTest {
         CallTree result = CallTracer.unitFinished(tree, System.nanoTime());
         CallTracer.methodExited(job);
 
-        CallNode run = single(result.calls());
+        CallNode run = single(result.topLevelCalls());
         assertTrue(run.startedBeforeUnit());
         assertEquals(1, run.calls());
         assertFalse(single(run.children()).startedBeforeUnit());
@@ -80,7 +80,7 @@ class CallTracerTest {
         CallTracer.methodExited(outer);
         CallTree result = CallTracer.unitFinished(tree, System.nanoTime());
 
-        CallNode walk = single(result.calls());
+        CallNode walk = single(result.topLevelCalls());
         assertEquals(3, walk.calls());
         assertEquals(List.of(), walk.children());
     }
@@ -96,7 +96,7 @@ class CallTracerTest {
         CallTree result = CallTracer.unitFinished(tree, System.nanoTime());
 
         assertEquals(List.of("com.acme.Job.outer", "com.acme.Job.next"),
-                result.calls().stream().map(CallNode::method).toList());
+                result.topLevelCalls().stream().map(CallNode::method).toList());
     }
 
     @Test
@@ -111,7 +111,7 @@ class CallTracerTest {
         CallTree result = CallTracer.unitFinished(tree, System.nanoTime());
 
         assertTrue(result.truncated());
-        assertEquals(CallTreeBuilder.MAX_NODES - 1, single(result.calls()).children().size());
+        assertEquals(CallTreeBuilder.MAX_NODES - 1, single(result.topLevelCalls()).children().size());
     }
 
     private static CallNode single(List<CallNode> nodes) {

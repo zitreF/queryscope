@@ -1,9 +1,9 @@
 package me.fertiz.queryscope.agent.console;
 
 import me.fertiz.queryscope.agent.findings.Finding;
-import me.fertiz.queryscope.agent.findings.RequestReport;
+import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.profiler.Profile;
-import me.fertiz.queryscope.agent.trace.RequestTrace;
+import me.fertiz.queryscope.agent.trace.UnitTrace;
 
 import java.io.PrintStream;
 import java.time.Clock;
@@ -18,7 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
-public final class SessionSummary implements Consumer<RequestReport> {
+public final class SessionSummary implements Consumer<UnitReport> {
 
     private static final int MAX_ENDPOINTS = 500;
     private static final int MAX_FINDINGS = 200;
@@ -41,8 +41,8 @@ public final class SessionSummary implements Consumer<RequestReport> {
     }
 
     @Override
-    public synchronized void accept(RequestReport report) {
-        RequestTrace trace = report.trace();
+    public synchronized void accept(UnitReport report) {
+        UnitTrace trace = report.trace();
         units++;
         queries += trace.queryCount();
         String name = trace.endpoint();
@@ -73,7 +73,7 @@ public final class SessionSummary implements Consumer<RequestReport> {
         }
         out.println();
         out.printf(Locale.ROOT, "QueryScope session summary: %s, %d %s, %d %s, %d CPU %s%n",
-                duration(Duration.between(startedAt, clock.instant())),
+                formatSessionLength(Duration.between(startedAt, clock.instant())),
                 units, units == 1 ? "request or task" : "requests and tasks", queries, queries == 1 ? "query" : "queries",
                 profile.samples(), profile.samples() == 1 ? "sample" : "samples");
         if (openTasks > 0) {
@@ -103,7 +103,7 @@ public final class SessionSummary implements Consumer<RequestReport> {
                 .limit(SHOWN)
                 .forEach(stats -> out.printf(Locale.ROOT, "  %-" + NAME_WIDTH + "s %6d %13.1f %10s %10s  %s%n",
                         shorten(stats.name), stats.calls, (double) stats.queries / stats.calls,
-                        time(stats.durationNanos / stats.calls), time(stats.databaseNanos),
+                        formatDuration(stats.durationNanos / stats.calls), formatDuration(stats.databaseNanos),
                         stats.badges.isEmpty() ? "-" : String.join(", ", stats.badges)));
         if (endpoints.size() > SHOWN) {
             out.printf(Locale.ROOT, "  ... and %d more%n", endpoints.size() - SHOWN);
@@ -137,15 +137,15 @@ public final class SessionSummary implements Consumer<RequestReport> {
                         method.self() * 100 / samples, method.total() * 100 / samples, shortenMethod(method.method()),
                         method.app() ? "  (your code)" : ""));
         List<Profile.HotMethod> yours = profile.hot().stream()
-                .filter(method -> method.own() > 0)
-                .sorted(Comparator.comparingInt(Profile.HotMethod::own).reversed())
+                .filter(method -> method.selfWithLibraries() > 0)
+                .sorted(Comparator.comparingInt(Profile.HotMethod::selfWithLibraries).reversed())
                 .limit(SHOWN_OWN_METHODS)
                 .toList();
         if (!yours.isEmpty()) {
             out.println();
             out.println("  Your methods by CPU time in them and in the library code they call");
             yours.forEach(method -> out.printf(Locale.ROOT, "  %5.1f%%  %s%n",
-                    method.own() * 100 / samples, shortenMethod(method.method())));
+                    method.selfWithLibraries() * 100 / samples, shortenMethod(method.method())));
         }
     }
 
@@ -157,14 +157,14 @@ public final class SessionSummary implements Consumer<RequestReport> {
         return name.length() <= NAME_WIDTH ? name : name.substring(0, NAME_WIDTH - 3) + "...";
     }
 
-    private static String time(long nanos) {
+    private static String formatDuration(long nanos) {
         double millis = nanos / 1_000_000.0;
         return millis >= 1000
                 ? String.format(Locale.ROOT, "%.2f s", millis / 1000)
                 : String.format(Locale.ROOT, "%.1f ms", millis);
     }
 
-    private static String duration(Duration duration) {
+    private static String formatSessionLength(Duration duration) {
         long seconds = duration.toSeconds();
         return seconds >= 60
                 ? String.format(Locale.ROOT, "%d min %d s", seconds / 60, seconds % 60)
@@ -184,7 +184,7 @@ public final class SessionSummary implements Consumer<RequestReport> {
             this.name = name;
         }
 
-        private void add(RequestReport report) {
+        private void add(UnitReport report) {
             calls++;
             queries += report.trace().queryCount();
             durationNanos += report.trace().durationNanos();

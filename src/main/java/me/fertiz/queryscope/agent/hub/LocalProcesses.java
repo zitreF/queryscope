@@ -5,8 +5,7 @@ import com.sun.tools.attach.AgentLoadException;
 import com.sun.tools.attach.AttachNotSupportedException;
 import com.sun.tools.attach.VirtualMachine;
 import com.sun.tools.attach.VirtualMachineDescriptor;
-import me.fertiz.queryscope.agent.QueryScopeAgent;
-import me.fertiz.queryscope.agent.launch.QueryScopeLauncher;
+import me.fertiz.queryscope.agent.config.AgentProperties;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -25,6 +24,7 @@ import java.util.stream.Collectors;
 public final class LocalProcesses implements Processes {
 
     private static final String UNNAMED = "Java process";
+    private static final String LAUNCHER_CLASS = "me.fertiz.queryscope.agent.cli.QueryScopeLauncher";
     private static final Pattern MAIN_CLASS = Pattern.compile("[\\w$.]+");
     private static final Pattern JAR = Pattern.compile("(.+?\\.jar)(?=\\s|$)", Pattern.CASE_INSENSITIVE);
 
@@ -46,7 +46,7 @@ public final class LocalProcesses implements Processes {
         attached.keySet().retainAll(machines.stream().map(machine -> Long.parseLong(machine.id()))
                 .collect(Collectors.toSet()));
         return machines.stream()
-                .map(this::process)
+                .map(this::toJavaProcess)
                 .sorted(Comparator.comparing(JavaProcess::name, String.CASE_INSENSITIVE_ORDER))
                 .toList();
     }
@@ -62,8 +62,8 @@ public final class LocalProcesses implements Processes {
         return port;
     }
 
-    static String name(String command) {
-        String program = program(command);
+    static String displayName(String command) {
+        String program = programOf(command);
         if (program.isEmpty()) {
             return UNNAMED;
         }
@@ -74,11 +74,11 @@ public final class LocalProcesses implements Processes {
     }
 
     static boolean isQueryScope(String command) {
-        String program = program(command);
-        return program.endsWith("queryscope.jar") || program.equals(QueryScopeLauncher.class.getName());
+        String program = programOf(command);
+        return program.endsWith("queryscope.jar") || program.equals(LAUNCHER_CLASS);
     }
 
-    private static String program(String command) {
+    private static String programOf(String command) {
         String trimmed = command.trim();
         String first = trimmed.split("\\s+", 2)[0];
         if (MAIN_CLASS.matcher(first).matches() && !first.toLowerCase(Locale.ROOT).endsWith(".jar")) {
@@ -88,9 +88,9 @@ public final class LocalProcesses implements Processes {
         return jar.lookingAt() ? jar.group(1) : first;
     }
 
-    private JavaProcess process(VirtualMachineDescriptor machine) {
+    private JavaProcess toJavaProcess(VirtualMachineDescriptor machine) {
         long pid = Long.parseLong(machine.id());
-        return new JavaProcess(pid, name(machine.displayName()), machine.displayName(),
+        return new JavaProcess(pid, displayName(machine.displayName()), machine.displayName(),
                 attached.getOrDefault(pid, JavaProcess.NOT_ATTACHED));
     }
 
@@ -102,10 +102,10 @@ public final class LocalProcesses implements Processes {
             throw new IOException("QueryScope cannot attach to process " + pid + ": " + e.getMessage(), e);
         }
         try {
-            String port = panelPort(machine);
+            String port = readPanelPort(machine);
             if (port == null) {
-                machine.loadAgent(agentJar.toString(), agentOptions(freePort()));
-                port = panelPort(machine);
+                machine.loadAgent(agentJar.toString(), agentOptionsWithPort(freePort()));
+                port = readPanelPort(machine);
             }
             if (port == null) {
                 throw new IOException("QueryScope started in process " + pid
@@ -122,11 +122,11 @@ public final class LocalProcesses implements Processes {
         }
     }
 
-    private static String panelPort(VirtualMachine machine) throws IOException {
-        return machine.getSystemProperties().getProperty(QueryScopeAgent.PANEL_PORT_PROPERTY);
+    private static String readPanelPort(VirtualMachine machine) throws IOException {
+        return machine.getSystemProperties().getProperty(AgentProperties.PANEL_PORT);
     }
 
-    private String agentOptions(int port) {
+    private String agentOptionsWithPort(int port) {
         List<String> options = new ArrayList<>(agentOptions);
         options.add("port=" + port);
         return String.join(",", options);

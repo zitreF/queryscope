@@ -1,4 +1,4 @@
-package me.fertiz.queryscope.agent.hub;
+package me.fertiz.queryscope.agent.cli;
 
 import org.junit.jupiter.api.Test;
 

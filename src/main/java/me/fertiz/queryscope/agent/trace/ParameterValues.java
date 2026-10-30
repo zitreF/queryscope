@@ -11,7 +11,7 @@ final class ParameterValues {
     private ParameterValues() {
     }
 
-    static String describe(String setter, Object value) {
+    static String format(String setter, Object value) {
         if (value == null || setter.equals("setNull")) {
             return "null";
         }

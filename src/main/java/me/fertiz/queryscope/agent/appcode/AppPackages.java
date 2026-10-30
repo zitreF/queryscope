@@ -1,6 +1,4 @@
-package me.fertiz.queryscope.agent.calltree;
-
-import me.fertiz.queryscope.agent.QueryScopeAgent;
+package me.fertiz.queryscope.agent.appcode;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -29,7 +27,7 @@ public final class AppPackages {
         return new AppPackages(packages);
     }
 
-    public static AppPackages detect() {
+    public static AppPackages fromMainClass() {
         return new AppPackages(mainClass(System.getProperty("jdk.module.main.class"), System.getProperty("sun.java.command"))
                 .flatMap(AppPackages::packageOf)
                 .map(List::of)
@@ -44,8 +42,8 @@ public final class AppPackages {
         return packages.isEmpty();
     }
 
-    public boolean covers(String typeName) {
-        return !CallSites.isGenerated(typeName) && !typeName.startsWith(QueryScopeAgent.PACKAGE)
+    public boolean includesClass(String typeName) {
+        return !CallSites.isGenerated(typeName) && !typeName.startsWith(CallSites.AGENT_PACKAGE_PREFIX)
                 && packages.stream().anyMatch(name -> typeName.startsWith(name + "."));
     }
 
@@ -56,7 +54,7 @@ public final class AppPackages {
         if (command == null || command.isBlank()) {
             return Optional.empty();
         }
-        Optional<Path> jar = jarOf(command.trim());
+        Optional<Path> jar = launchedJar(command.trim());
         if (jar.isPresent()) {
             return manifestMainClass(jar.get());
         }
@@ -72,7 +70,7 @@ public final class AppPackages {
         return name.indexOf('.') < 0 ? Optional.empty() : Optional.of(name);
     }
 
-    private static Optional<Path> jarOf(String command) {
+    private static Optional<Path> launchedJar(String command) {
         Matcher end = JAR_END.matcher(command);
         while (end.find()) {
             try {

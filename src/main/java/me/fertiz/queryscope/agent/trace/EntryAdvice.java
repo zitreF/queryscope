@@ -9,13 +9,13 @@ public final class EntryAdvice {
 
     @Advice.OnMethodEnter(suppress = Throwable.class)
     public static boolean enter(@Advice.Origin("#t.#m") String method) {
-        return RequestTracer.taskStarted(method);
+        return UnitTracer.taskStarted(method);
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class)
     public static void exit(@Advice.Enter boolean started) {
         if (started) {
-            RequestTracer.taskFinished();
+            UnitTracer.taskFinished();
         }
     }
 }

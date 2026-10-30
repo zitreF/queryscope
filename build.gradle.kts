@@ -43,7 +43,7 @@ tasks.shadowJar {
         attributes(
             "Premain-Class" to "me.fertiz.queryscope.agent.QueryScopeAgent",
             "Agent-Class" to "me.fertiz.queryscope.agent.QueryScopeAgent",
-            "Main-Class" to "me.fertiz.queryscope.agent.launch.QueryScopeLauncher",
+            "Main-Class" to "me.fertiz.queryscope.agent.cli.QueryScopeLauncher",
             "Can-Retransform-Classes" to "true",
         )
     }

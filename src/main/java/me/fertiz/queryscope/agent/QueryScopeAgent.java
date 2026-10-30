@@ -1,20 +1,22 @@
 package me.fertiz.queryscope.agent;
 
-import me.fertiz.queryscope.agent.calltree.AppPackages;
+import me.fertiz.queryscope.agent.appcode.AppPackages;
+import me.fertiz.queryscope.agent.appcode.CallSites;
+import me.fertiz.queryscope.agent.config.AgentConfig;
+import me.fertiz.queryscope.agent.config.AgentProperties;
 import me.fertiz.queryscope.agent.console.ConsoleReporter;
 import me.fertiz.queryscope.agent.console.SessionSummary;
 import me.fertiz.queryscope.agent.findings.QueryAnalyzer;
-import me.fertiz.queryscope.agent.findings.RequestReport;
+import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.http.Browser;
 import me.fertiz.queryscope.agent.http.LocalServer;
-import me.fertiz.queryscope.agent.launch.LaunchCommand;
 import me.fertiz.queryscope.agent.panel.PanelServer;
 import me.fertiz.queryscope.agent.panel.ReportStore;
 import me.fertiz.queryscope.agent.profiler.Profile;
 import me.fertiz.queryscope.agent.profiler.SampleStore;
 import me.fertiz.queryscope.agent.profiler.Sampling;
-import me.fertiz.queryscope.agent.trace.RequestTrace;
-import me.fertiz.queryscope.agent.trace.RequestTracer;
+import me.fertiz.queryscope.agent.trace.UnitTrace;
+import me.fertiz.queryscope.agent.trace.UnitTracer;
 
 import java.io.IOException;
 import java.lang.instrument.Instrumentation;
@@ -25,8 +27,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class QueryScopeAgent {
 
-    public static final String PANEL_PORT_PROPERTY = "queryscope.panelPort";
-    public static final String PACKAGE = QueryScopeAgent.class.getPackageName() + ".";
 
     private static final System.Logger LOGGER = System.getLogger("QueryScope");
     private static final int STORED_REQUESTS = 200;
@@ -62,16 +62,19 @@ public final class QueryScopeAgent {
     }
 
     private static void startWith(AgentConfig config, Instrumentation instrumentation) {
-        exitWithLauncher();
+        exitWhenLauncherExits();
         QueryAnalyzer analyzer = new QueryAnalyzer(config.thresholds());
         ConsoleReporter console = new ConsoleReporter();
         ReportStore store = new ReportStore(STORED_REQUESTS);
         SessionSummary summary = new SessionSummary(Clock.systemUTC());
-        RequestTracer.publishTo(trace -> publish(trace, analyzer, console, store, summary));
-        AppPackages application = config.packages().isEmpty() ? AppPackages.detect() : AppPackages.of(config.packages());
+        UnitTracer.publishTo(trace -> analyzeAndPublish(trace, analyzer, console, store, summary));
+        AppPackages application = config.packages().isEmpty()
+                ? AppPackages.fromMainClass()
+                : AppPackages.of(config.packages());
         AppPackages callTreePackages = config.callTree() ? application : AppPackages.of(List.of());
+        CallSites.treatAsApplicationCode(config.packages());
         if (config.callTree()) {
-            logCallTree(application);
+            logCallTreePackages(application);
         }
         AgentInstaller.install(instrumentation, config.entryMethods(), callTreePackages);
         SampleStore samples = new SampleStore(Clock.systemUTC(), STORED_SAMPLES, SAMPLE_AGE);
@@ -82,19 +85,19 @@ public final class QueryScopeAgent {
                 if (sampling != null) {
                     sampling.stop();
                 }
-                summary.print(System.out, Profile.build(samples, application, Profile.Filter.everything()),
-                        RequestTracer.openTaskCount());
+                summary.print(System.out, Profile.build(samples, application, Profile.Filter.allSamples()),
+                        UnitTracer.openTaskCount());
             }, "queryscope-summary"));
         }
     }
 
-    private static void publish(RequestTrace trace, QueryAnalyzer analyzer, ConsoleReporter console, ReportStore store,
-                                SessionSummary summary) {
+    private static void analyzeAndPublish(UnitTrace trace, QueryAnalyzer analyzer, ConsoleReporter console,
+                                          ReportStore store, SessionSummary summary) {
         boolean ranSql = !trace.queries().isEmpty();
-        if (!ranSql && trace.callTree().calls().isEmpty()) {
+        if (!ranSql && trace.callTree().topLevelCalls().isEmpty()) {
             return;
         }
-        RequestReport report = analyzer.analyze(trace);
+        UnitReport report = analyzer.analyze(trace);
         store.add(report);
         summary.accept(report);
         if (ranSql || !report.findings().isEmpty()) {
@@ -102,15 +105,15 @@ public final class QueryScopeAgent {
         }
     }
 
-    private static void logCallTree(AppPackages application) {
+    private static void logCallTreePackages(AppPackages application) {
         LOGGER.log(System.Logger.Level.INFO, application.isEmpty()
                 ? "QueryScope could not tell the application's package, so the call tree is off."
                 + " Pass package=com.acme to turn it on."
                 : "QueryScope records the call tree of " + String.join(", ", application.names()));
     }
 
-    private static void exitWithLauncher() {
-        String launcherPid = System.getProperty(LaunchCommand.LAUNCHER_PID_PROPERTY);
+    private static void exitWhenLauncherExits() {
+        String launcherPid = System.getProperty(AgentProperties.LAUNCHER_PID);
         if (launcherPid != null) {
             ProcessHandle.of(Long.parseLong(launcherPid))
                     .ifPresent(launcher -> launcher.onExit().thenRun(() -> System.exit(0)));
@@ -123,7 +126,7 @@ public final class QueryScopeAgent {
             LocalServer panel = PanelServer.start(config.port(), config.portGiven(), store, callTreePackages,
                     application, samples);
             String url = "http://localhost:" + panel.port();
-            System.setProperty(PANEL_PORT_PROPERTY, String.valueOf(panel.port()));
+            System.setProperty(AgentProperties.PANEL_PORT, String.valueOf(panel.port()));
             LOGGER.log(System.Logger.Level.INFO, "QueryScope panel is running at " + url);
             if (config.openPanel()) {
                 Browser.open(url);

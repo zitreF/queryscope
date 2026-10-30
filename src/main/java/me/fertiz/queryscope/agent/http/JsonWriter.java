@@ -8,7 +8,7 @@ public final class JsonWriter {
     private boolean needsComma;
 
     public JsonWriter beginObject() {
-        separate();
+        writeCommaIfNeeded();
         json.append('{');
         needsComma = false;
         return this;
@@ -21,7 +21,7 @@ public final class JsonWriter {
     }
 
     public JsonWriter beginArray() {
-        separate();
+        writeCommaIfNeeded();
         json.append('[');
         needsComma = false;
         return this;
@@ -34,47 +34,47 @@ public final class JsonWriter {
     }
 
     public JsonWriter name(String name) {
-        separate();
-        quote(name);
+        writeCommaIfNeeded();
+        writeQuoted(name);
         json.append(':');
         needsComma = false;
         return this;
     }
 
     public JsonWriter value(String value) {
-        separate();
+        writeCommaIfNeeded();
         if (value == null) {
             json.append("null");
         } else {
-            quote(value);
+            writeQuoted(value);
         }
         needsComma = true;
         return this;
     }
 
     public JsonWriter nullValue() {
-        separate();
+        writeCommaIfNeeded();
         json.append("null");
         needsComma = true;
         return this;
     }
 
     public JsonWriter value(long value) {
-        separate();
+        writeCommaIfNeeded();
         json.append(value);
         needsComma = true;
         return this;
     }
 
     public JsonWriter value(double value) {
-        separate();
+        writeCommaIfNeeded();
         json.append(String.format(Locale.ROOT, "%.3f", value));
         needsComma = true;
         return this;
     }
 
     public JsonWriter value(boolean value) {
-        separate();
+        writeCommaIfNeeded();
         json.append(value);
         needsComma = true;
         return this;
@@ -85,13 +85,13 @@ public final class JsonWriter {
         return json.toString();
     }
 
-    private void separate() {
+    private void writeCommaIfNeeded() {
         if (needsComma) {
             json.append(',');
         }
     }
 
-    private void quote(String text) {
+    private void writeQuoted(String text) {
         json.append('"');
         for (int index = 0; index < text.length(); index++) {
             char character = text.charAt(index);

@@ -24,45 +24,46 @@ const FINDING_TYPES = {
     nPlusOne: {
         area: 'sql', css: 'n-plus-one', name: 'N+1', label: finding => `N+1 ×${finding.executions}`,
         title: finding => `N+1 query: the same SELECT ran ${finding.executions} times`,
-        meta: finding => [callSiteLine(finding.callSite), ` · ${formatMs(finding.totalMs)} in total`],
+        meta: finding => [createCallSiteLine(finding.callSite), ` · ${formatMs(finding.totalMs)} in total`],
         hint: 'Load the rows in one query (join fetch, @EntityGraph or batch fetching) instead of one query per parent row.',
     },
     slowQuery: {
         area: 'sql', css: 'slow', name: 'Slow', label: finding => `Slow ${formatMs(finding.durationMs)}`,
         title: finding => `Slow query: ${formatMs(finding.durationMs)}`,
-        meta: finding => [callSiteLine(finding.callSite), ` · query #${finding.queryIndex + 1}`],
+        meta: finding => [createCallSiteLine(finding.callSite), ` · query #${finding.queryIndex + 1}`],
         hint: 'Check the query plan (EXPLAIN) for full table scans, a missing index or a join on an unindexed column.',
     },
     repeatedWrite: {
         area: 'sql', css: 'repeated-write', name: 'Writes', label: finding => `Writes ×${finding.executions}`,
         title: finding => `Unbatched writes: the same statement ran ${finding.executions} times`,
-        meta: finding => [callSiteLine(finding.callSite), ` · ${formatMs(finding.totalMs)} in total`],
+        meta: finding => [createCallSiteLine(finding.callSite), ` · ${formatMs(finding.totalMs)} in total`],
         hint: 'Send them as one batch: addBatch and executeBatch, or hibernate.jdbc.batch_size with sequence-generated ids.',
     },
     duplicateQuery: {
         area: 'sql', css: 'duplicate', name: 'Duplicate', label: finding => `Duplicate ×${finding.executions}`,
         title: finding => `Duplicate query: the same SELECT with the same parameters ran ${finding.executions} times`,
-        meta: finding => [`Parameters ${finding.parameters || 'none'} · `, callSiteLine(finding.callSite)],
+        meta: finding => [`Parameters ${finding.parameters || 'none'} · `, createCallSiteLine(finding.callSite)],
         hint: 'Reuse the first result, pass it along, or cache it for the request.',
     },
     largeResult: {
         area: 'sql', css: 'large-result', name: 'Rows', label: finding => `${formatCount(finding.rows)} rows`,
         title: finding => `Large result: ${formatCount(finding.rows)} rows`,
-        meta: finding => [callSiteLine(finding.callSite), ` · query #${finding.queryIndex + 1}`],
+        meta: finding => [createCallSiteLine(finding.callSite), ` · query #${finding.queryIndex + 1}`],
         hint: 'Fetch only what the response needs: paginate (LIMIT, Pageable), filter in SQL or select fewer columns.',
     },
     tooManyQueries: {
         area: 'sql', css: 'too-many', name: 'Queries', label: finding => `${finding.queries} queries`,
         title: finding => `Too many queries: ${finding.queries} in one unit of work`,
-        meta: finding => `${share(finding.databaseMs, finding.durationMs)} of the time in the database`
+        meta: finding => `${percentText(finding.databaseMs, finding.durationMs)} of the time in the database`
             + ` (${formatMs(finding.databaseMs)} of ${formatMs(finding.durationMs)}) · the limit is ${finding.limit}`,
         hint: 'Look for N+1 patterns and repeated lookups, and load related data with joins instead of separate queries.',
     },
     slowMethod: {
         area: 'java', css: 'slow-method', name: 'Code', label: finding => `Slow code ${formatMs(finding.ownMs)}`,
         title: finding => `Slow method: ${formatMs(finding.ownMs)} in its own code, outside SQL`,
-        meta: finding => [el('code', {title: finding.method}, shortMethod(finding.method)),
-            ` · ${plural(finding.calls, 'call', 'calls')} · ${share(finding.ownMs, finding.durationMs)} of the time`],
+        meta: finding => [createElement('code', {title: finding.method}, shortMethod(finding.method)),
+            ` · ${countWithNoun(finding.calls, 'call', 'calls')}`
+                + ` · ${percentText(finding.ownMs, finding.durationMs)} of the time`],
         hint: 'The time goes to Java, not to the database: this method and the library code it calls. Look for loops that '
             + 'build strings, heavy mapping or serialization, and blocking calls. The call tree below shows where.',
     },
@@ -90,20 +91,20 @@ const LEGACY_VIEWS = {live: 'sql/live', requests: 'sql/requests'};
 const HOT_METHODS = 15;
 const CALL_INDENT = 18;
 const CALL_EXPAND_SHARE = 0.05;
-const ROLE_PRIORITY = ['nPlusOne', 'slowQuery', 'repeatedWrite', 'largeResult', 'duplicateQuery'];
+const HIGHLIGHT_PRIORITY = ['nPlusOne', 'slowQuery', 'repeatedWrite', 'largeResult', 'duplicateQuery'];
 
 const state = {
     reports: [],
     sqlReports: [],
     javaReports: [],
-    pending: [],
-    selectedId: null,
-    follow: true,
+    reportsWhilePaused: [],
+    selectedRequestId: null,
+    followNewestRequest: true,
     onlyFindings: false,
-    callSelectedId: null,
-    callFollow: true,
+    selectedCallTreeId: null,
+    followNewestCallTree: true,
     onlySlowCode: false,
-    callRenderedId: undefined,
+    renderedCallTreeId: undefined,
     connected: false,
     paused: false,
     pausedAt: 0,
@@ -114,44 +115,46 @@ const state = {
         thread: 'all',
         frames: 'app',
         framesChosen: false,
-        request: null,
+        inFlight: null,
         samples: 'cpu',
         hotMode: 'all',
         scope: null,
-        focus: [],
+        zoomPath: [],
         search: '',
         data: null,
         layout: [],
         loadedAt: 0,
     },
     windowMs: WINDOWS[0].ms,
-    renderedId: undefined,
+    renderedRequestId: undefined,
     laneEnds: [],
-    hits: [],
+    streamHitBoxes: [],
     hoverId: null,
-    stats: null,
-    feedTimes: [],
-    announced: new Set(),
+    kpiNodes: null,
+    feedAgeCells: [],
+    announcedFindingKeys: new Set(),
     callTrees: new Map(),
-    callToggles: new Map(),
+    callTreeExpanded: new Map(),
 };
 
-const css = getComputedStyle(document.documentElement);
-const color = name => css.getPropertyValue(name).trim();
+const rootStyle = getComputedStyle(document.documentElement);
+const cssVariable = name => rootStyle.getPropertyValue(name).trim();
 const COLORS = {
-    blue: color('--blue'),
-    red: color('--red'),
-    yellow: color('--yellow'),
-    orange: color('--orange'),
-    muted: color('--muted'),
-    border: color('--border'),
-    text: color('--text'),
-    mono: color('--mono'),
+    blue: cssVariable('--blue'),
+    red: cssVariable('--red'),
+    yellow: cssVariable('--yellow'),
+    orange: cssVariable('--orange'),
+    muted: cssVariable('--muted'),
+    border: cssVariable('--border'),
+    text: cssVariable('--text'),
+};
+const FONTS = {
+    mono: cssVariable('--mono'),
 };
 const SEVERITY_COLORS = {'ok': COLORS.blue, 'warn': COLORS.orange, 'slow': COLORS.yellow, 'n-plus-one': COLORS.red};
 
-const streamCanvas = $('stream-canvas');
-const tooltip = $('stream-tooltip');
+const streamCanvas = byId('stream-canvas');
+const tooltip = byId('stream-tooltip');
 
 for (const button of document.querySelectorAll('.tab')) {
     button.addEventListener('click', () => selectView(state.lastViews[button.dataset.area]));
@@ -160,38 +163,38 @@ for (const button of document.querySelectorAll('.subtab')) {
     button.addEventListener('click', () => selectView(button.dataset.view));
 }
 window.addEventListener('hashchange', () => selectView(viewFromHash()));
-$('pause').addEventListener('click', togglePause);
-$('clear').addEventListener('click', clearAll);
-$('only-findings').addEventListener('change', event => {
+byId('pause').addEventListener('click', togglePause);
+byId('clear').addEventListener('click', clearAll);
+byId('only-findings').addEventListener('change', event => {
     state.onlyFindings = event.target.checked;
-    render();
+    renderAll();
 });
-$('only-slow-code').addEventListener('change', event => {
+byId('only-slow-code').addEventListener('change', event => {
     state.onlySlowCode = event.target.checked;
-    render();
+    renderAll();
 });
-$('profile-search').addEventListener('input', event => {
+byId('profile-search').addEventListener('input', event => {
     state.profile.search = event.target.value.trim();
     renderFlame();
 });
-$('profile-thread').addEventListener('change', event => {
+byId('profile-thread').addEventListener('change', event => {
     state.profile.thread = event.target.value;
-    state.profile.focus = [];
+    state.profile.zoomPath = [];
     loadProfile();
 });
-$('profile-reset').addEventListener('click', () => {
-    state.profile.focus = [];
+byId('profile-reset').addEventListener('click', () => {
+    state.profile.zoomPath = [];
     renderFlame();
 });
-$('flame').addEventListener('mousemove', hoverFlame);
-$('flame').addEventListener('mouseleave', () => $('flame-tooltip').hidden = true);
-$('flame').addEventListener('click', zoomFlame);
+byId('flame').addEventListener('mousemove', hoverFlame);
+byId('flame').addEventListener('mouseleave', () => byId('flame-tooltip').hidden = true);
+byId('flame').addEventListener('click', zoomFlame);
 window.addEventListener('resize', () => {
     if (state.view === 'java/profile') {
         renderFlame();
     }
 });
-streamCanvas.addEventListener('mousemove', event => hover(event));
+streamCanvas.addEventListener('mousemove', event => hoverLiveStream(event));
 streamCanvas.addEventListener('mouseleave', () => {
     state.hoverId = null;
     tooltip.hidden = true;
@@ -205,12 +208,12 @@ streamCanvas.addEventListener('click', () => {
 renderWindowButtons();
 renderProfileControls();
 selectView(viewFromHash());
-render();
-connect();
-setInterval(tick, 1000);
-requestAnimationFrame(frame);
+renderAll();
+connectToEventStream();
+setInterval(onEverySecond, 1000);
+requestAnimationFrame(animateLiveStream);
 
-function connect() {
+function connectToEventStream() {
     const events = new EventSource('api/events');
     let buffered = null;
 
@@ -221,46 +224,47 @@ function connect() {
             if (!response.ok) {
                 throw new Error(`the panel answered ${response.status}`);
             }
-            const stored = (await response.json()).map(enrich);
+            const stored = (await response.json()).map(addViewFields);
             setReports([...buffered.reverse(), ...stored]);
-            state.reports.forEach(report => report.findings.forEach(finding => state.announced.add(findingKey(report, finding))));
+            state.reports.forEach(report => report.findings.forEach(
+                finding => state.announcedFindingKeys.add(findingKey(report, finding))));
             relayoutLanes();
-            render();
+            renderAll();
             setConnection(true);
         } catch (error) {
             events.close();
             setConnection(false);
-            setTimeout(connect, RECONNECT_MS);
+            setTimeout(connectToEventStream, RECONNECT_MS);
         } finally {
             buffered = null;
         }
     });
 
     events.addEventListener('request', event => {
-        const report = enrich(JSON.parse(event.data));
+        const report = addViewFields(JSON.parse(event.data));
         if (buffered) {
             buffered.push(report);
         } else if (state.paused) {
-            state.pending.push(report);
+            state.reportsWhilePaused.push(report);
             updatePauseButton();
         } else {
-            add(report);
+            addLiveReport(report);
         }
     });
 
     events.addEventListener('error', () => setConnection(false));
 }
 
-function add(report) {
+function addLiveReport(report) {
     setReports([report, ...state.reports]);
     if (report.view.hasSql) {
         assignLane(report);
     }
-    announce(report);
-    render();
+    announceNewFinding(report);
+    renderAll();
 }
 
-function enrich(report) {
+function addViewFields(report) {
     const start = parseInstant(report.startedAt);
     const sqlFindings = report.findings.filter(finding => findingArea(finding) === 'sql');
     const javaFindings = report.findings.filter(finding => findingArea(finding) === 'java');
@@ -282,12 +286,12 @@ function enrich(report) {
 }
 
 function setReports(reports) {
-    state.reports = newestUnique(reports);
+    state.reports = keepNewestUniqueReports(reports);
     state.sqlReports = state.reports.filter(report => report.view.hasSql);
-    state.javaReports = state.reports.filter(report => report.methods > 0);
+    state.javaReports = state.reports.filter(report => report.methodCount > 0);
 }
 
-function newestUnique(reports) {
+function keepNewestUniqueReports(reports) {
     const seen = new Set();
     const kept = {sql: 0, java: 0};
     return reports.filter(report => {
@@ -301,7 +305,7 @@ function newestUnique(reports) {
     });
 }
 
-function now() {
+function displayTime() {
     return state.paused ? state.pausedAt : Date.now();
 }
 
@@ -313,7 +317,7 @@ function setConnection(connected) {
 function updateStatus() {
     document.body.classList.toggle('live', state.connected && !state.paused);
     document.body.classList.toggle('paused', state.paused);
-    $('connection').textContent = state.paused ? 'Paused' : state.connected ? 'Live' : 'Reconnecting';
+    byId('connection').textContent = state.paused ? 'Paused' : state.connected ? 'Live' : 'Reconnecting';
 }
 
 function togglePause() {
@@ -321,18 +325,18 @@ function togglePause() {
     if (state.paused) {
         state.pausedAt = Date.now();
     } else {
-        const pending = state.pending;
-        state.pending = [];
-        pending.forEach(add);
+        const pending = state.reportsWhilePaused;
+        state.reportsWhilePaused = [];
+        pending.forEach(addLiveReport);
     }
     updatePauseButton();
     updateStatus();
-    render();
+    renderAll();
 }
 
 function updatePauseButton() {
-    $('pause').textContent = state.paused
-        ? `Resume${state.pending.length > 0 ? ` (${state.pending.length} new)` : ''}`
+    byId('pause').textContent = state.paused
+        ? `Resume${state.reportsWhilePaused.length > 0 ? ` (${state.reportsWhilePaused.length} new)` : ''}`
         : 'Pause';
 }
 
@@ -343,20 +347,20 @@ async function clearAll() {
             throw new Error(`the panel answered ${response.status}`);
         }
     } catch (error) {
-        $('snackbar-action').hidden = true;
+        byId('snackbar-action').hidden = true;
         showSnackbar(`Could not clear the requests: ${error.message}`, SNACK_MS);
         return;
     }
     setReports([]);
-    state.pending = [];
-    state.announced.clear();
-    state.selectedId = null;
-    state.follow = true;
-    state.callSelectedId = null;
-    state.callFollow = true;
+    state.reportsWhilePaused = [];
+    state.announcedFindingKeys.clear();
+    state.selectedRequestId = null;
+    state.followNewestRequest = true;
+    state.selectedCallTreeId = null;
+    state.followNewestCallTree = true;
     state.laneEnds = [];
     updatePauseButton();
-    render();
+    renderAll();
 }
 
 function viewFromHash() {
@@ -378,7 +382,7 @@ function selectView(view) {
         button.setAttribute('aria-selected', String(button.dataset.view === view));
     }
     for (const [key, id] of Object.entries(VIEWS)) {
-        $(id).hidden = key !== view;
+        byId(id).hidden = key !== view;
     }
     if (location.hash !== `#${view}`) {
         history.replaceState(null, '', `#${view}`);
@@ -389,17 +393,17 @@ function selectView(view) {
 }
 
 function openRequest(id) {
-    state.selectedId = id;
-    state.follow = false;
+    state.selectedRequestId = id;
+    state.followNewestRequest = false;
     selectView('sql/requests');
-    render();
+    renderAll();
 }
 
 function openCalls(id) {
-    state.callSelectedId = id;
-    state.callFollow = false;
+    state.selectedCallTreeId = id;
+    state.followNewestCallTree = false;
     selectView('java/calls');
-    render();
+    renderAll();
 }
 
 function openProfile(report) {
@@ -409,7 +413,7 @@ function openProfile(report) {
         label: `${report.method} ${report.path}`,
         endpoint: isTask(report) ? `Task ${report.path}` : `${report.method} ${report.view.endpointPath}`,
     };
-    state.profile.focus = [];
+    state.profile.zoomPath = [];
     state.profile.data = null;
     renderProfileControls();
     selectView('java/profile');
@@ -423,38 +427,38 @@ function openFinding(report, finding) {
     }
 }
 
-function render() {
-    $('request-count').textContent = String(state.sqlReports.length);
-    $('call-count').textContent = String(state.javaReports.length);
-    $('stream-empty').hidden = state.sqlReports.length > 0;
-    renderStats();
+function renderAll() {
+    byId('request-count').textContent = String(state.sqlReports.length);
+    byId('call-count').textContent = String(state.javaReports.length);
+    byId('stream-empty').hidden = state.sqlReports.length > 0;
+    renderKpis();
     renderEndpoints();
     renderFeed();
-    renderRequests();
-    renderCalls();
+    renderRequestList();
+    renderCallTreeList();
 }
 
-function tick() {
-    renderStats();
+function onEverySecond() {
+    renderKpis();
     if (state.view === 'java/profile' && !state.paused && state.profile.scope === null
-        && state.profile.request === null && Date.now() - state.profile.loadedAt >= PROFILE_REFRESH_MS) {
+        && state.profile.inFlight === null && Date.now() - state.profile.loadedAt >= PROFILE_REFRESH_MS) {
         loadProfile();
     }
-    const current = now();
-    for (const {node, end} of state.feedTimes) {
-        node.textContent = ago(current - end);
+    const current = displayTime();
+    for (const {node, end} of state.feedAgeCells) {
+        node.textContent = timeAgo(current - end);
     }
 }
 
-function frame() {
+function animateLiveStream() {
     if (state.view === 'sql/live') {
         drawStream();
     }
-    requestAnimationFrame(frame);
+    requestAnimationFrame(animateLiveStream);
 }
 
-function renderStats() {
-    const end = now();
+function renderKpis() {
+    const end = displayTime();
     const from = end - KPI_WINDOW_MS;
     const recent = state.sqlReports.filter(report => report.view.end > from && report.view.end <= end);
     const queries = recent.reduce((sum, report) => sum + report.view.queryCount, 0);
@@ -462,14 +466,15 @@ function renderStats() {
     const db = recent.reduce((sum, report) => sum + report.view.dbMs, 0);
     const withNPlusOne = state.sqlReports.filter(report => report.view.types.has('nPlusOne'));
     const withSlow = state.sqlReports.filter(report => report.view.types.has('slowQuery'));
-    const dbSeries = series(end, report => report.view.dbMs);
-    const durationSeries = series(end, report => report.durationMs);
-    const stats = [
+    const dbSeries = kpiBuckets(end, report => report.view.dbMs);
+    const durationSeries = kpiBuckets(end, report => report.durationMs);
+    const kpis = [
         {key: 'requests', label: 'Requests per minute', value: recent.length,
-            sub: `${plural(state.sqlReports.length, 'request', 'requests')} kept`, series: series(end, () => 1)},
+            sub: `${countWithNoun(state.sqlReports.length, 'request', 'requests')} kept`,
+            series: kpiBuckets(end, () => 1)},
         {key: 'queries', label: 'Queries per minute', value: queries,
             sub: recent.length > 0 ? `${(queries / recent.length).toFixed(1)} per request` : 'No requests in the last minute',
-            series: series(end, report => report.view.queryCount)},
+            series: kpiBuckets(end, report => report.view.queryCount)},
         {key: 'db', label: 'Time in database', value: duration > 0 ? Math.round(db / duration * 100) : 0, unit: '%',
             sub: `${formatMs(db)} of ${formatMs(duration)} in the last minute`,
             series: dbSeries.map((value, index) => durationSeries[index] > 0 ? value / durationSeries[index] : 0)},
@@ -480,29 +485,31 @@ function renderStats() {
             alert: withSlow.length > 0 ? 'alert-yellow' : '',
             sub: withSlow.length > 0 ? `Latest: ${withSlow[0].method} ${withSlow[0].view.endpointPath}` : 'None so far'},
     ];
-    if (!state.stats) {
-        state.stats = new Map();
-        $('kpis').replaceChildren(...stats.map(stat => {
-            const value = el('div', {class: 'stat-value'});
-            const sub = el('div', {class: 'stat-sub'});
-            const canvas = stat.series ? el('canvas', {}) : null;
-            const node = el('div', {class: 'stat'}, el('div', {class: 'stat-label'}, stat.label), value, sub, canvas);
-            state.stats.set(stat.key, {node, value, sub, canvas});
+    if (!state.kpiNodes) {
+        state.kpiNodes = new Map();
+        byId('kpis').replaceChildren(...kpis.map(kpi => {
+            const value = createElement('div', {class: 'stat-value'});
+            const sub = createElement('div', {class: 'stat-sub'});
+            const canvas = kpi.series ? createElement('canvas', {}) : null;
+            const node = createElement('div', {class: 'stat'},
+                createElement('div', {class: 'stat-label'}, kpi.label), value, sub, canvas);
+            state.kpiNodes.set(kpi.key, {node, value, sub, canvas});
             return node;
         }));
     }
-    for (const stat of stats) {
-        const view = state.stats.get(stat.key);
-        view.node.className = `stat ${stat.alert ?? ''}`.trim();
-        view.value.replaceChildren(...[String(stat.value), stat.unit ? el('small', {}, stat.unit) : null].filter(Boolean));
-        view.sub.textContent = stat.sub;
+    for (const kpi of kpis) {
+        const view = state.kpiNodes.get(kpi.key);
+        view.node.className = `stat ${kpi.alert ?? ''}`.trim();
+        view.value.replaceChildren(
+            ...[String(kpi.value), kpi.unit ? createElement('small', {}, kpi.unit) : null].filter(Boolean));
+        view.sub.textContent = kpi.sub;
         if (view.canvas) {
-            drawSparkline(view.canvas, stat.series);
+            drawSparkline(view.canvas, kpi.series);
         }
     }
 }
 
-function series(end, valueOf) {
+function kpiBuckets(end, valueOf) {
     const size = KPI_WINDOW_MS / SPARK_BUCKETS;
     const from = end - KPI_WINDOW_MS;
     const values = new Array(SPARK_BUCKETS).fill(0);
@@ -516,7 +523,7 @@ function series(end, valueOf) {
 }
 
 function drawSparkline(canvas, values) {
-    const context = prepare(canvas);
+    const context = resetCanvas(canvas);
     if (!context) {
         return;
     }
@@ -539,7 +546,7 @@ function drawSparkline(canvas, values) {
 }
 
 function renderWindowButtons() {
-    $('window-chips').replaceChildren(...WINDOWS.map(option => el('button', {
+    byId('window-chips').replaceChildren(...WINDOWS.map(option => createElement('button', {
         type: 'button',
         class: 'segment',
         'aria-pressed': String(option.ms === state.windowMs),
@@ -553,33 +560,36 @@ function renderWindowButtons() {
 
 function renderProfileControls() {
     const profile = state.profile;
-    segmented($('profile-window'), PROFILE_WINDOWS, profile.seconds, value => {
+    renderSegmentedControl(byId('profile-window'), PROFILE_WINDOWS, profile.seconds, value => {
         profile.seconds = value;
         loadProfile();
     });
-    segmented($('profile-frames'), [{label: 'All frames', value: 'all'}, {label: 'Your code', value: 'app'}],
+    renderSegmentedControl(byId('profile-frames'),
+        [{label: 'All frames', value: 'all'}, {label: 'Your code', value: 'app'}],
         profile.frames, value => {
             profile.frames = value;
             profile.framesChosen = true;
-            profile.focus = [];
+            profile.zoomPath = [];
             loadProfile();
         });
-    segmented($('profile-samples'), [{label: 'CPU', value: 'cpu'}, {label: 'CPU and native', value: 'all'}],
+    renderSegmentedControl(byId('profile-samples'),
+        [{label: 'CPU', value: 'cpu'}, {label: 'CPU and native', value: 'all'}],
         profile.samples, value => {
             profile.samples = value;
-            profile.focus = [];
+            profile.zoomPath = [];
             loadProfile();
         });
-    segmented($('hot-mode'), [{label: 'All methods', value: 'all'}, {label: 'Your methods', value: 'app'}],
+    renderSegmentedControl(byId('hot-mode'),
+        [{label: 'All methods', value: 'all'}, {label: 'Your methods', value: 'app'}],
         profile.hotMode, value => {
             profile.hotMode = value;
             renderHotList();
         });
-    $('profile-window').hidden = profile.scope !== null;
+    byId('profile-window').hidden = profile.scope !== null;
 }
 
-function segmented(container, options, current, onSelect) {
-    container.replaceChildren(...options.map(option => el('button', {
+function renderSegmentedControl(container, options, current, onSelect) {
+    container.replaceChildren(...options.map(option => createElement('button', {
         type: 'button',
         class: 'segment',
         'aria-pressed': String(option.value === current),
@@ -593,8 +603,8 @@ function segmented(container, options, current, onSelect) {
 
 async function loadProfile() {
     const profile = state.profile;
-    profile.request?.abort();
-    const request = profile.request = new AbortController();
+    profile.inFlight?.abort();
+    const request = profile.inFlight = new AbortController();
     const parameters = new URLSearchParams({thread: profile.thread, frames: profile.frames, samples: profile.samples});
     if (profile.scope) {
         parameters.set('request', String(profile.scope.id));
@@ -605,14 +615,14 @@ async function loadProfile() {
     let data;
     try {
         const response = await fetch(`api/profile?${parameters}`, {signal: request.signal});
-        data = response.ok ? linkParents(await response.json()) : {missing: true};
+        data = response.ok ? addParentLinks(await response.json()) : {missing: true};
     } catch (error) {
         data = {failed: true};
     }
     if (request.signal.aborted) {
         return;
     }
-    profile.request = null;
+    profile.inFlight = null;
     profile.data = data;
     profile.loadedAt = Date.now();
     if (profile.frames === 'app' && !profile.framesChosen && profile.data.packages && profile.data.packages.length === 0) {
@@ -624,7 +634,7 @@ async function loadProfile() {
     renderProfile();
 }
 
-function linkParents(data) {
+function addParentLinks(data) {
     const link = (node, parent) => {
         node.parent = parent;
         node.children.forEach(child => link(child, node));
@@ -638,7 +648,7 @@ function linkParents(data) {
 function renderProfile() {
     renderProfileScope();
     renderThreadOptions();
-    $('profile-status').textContent = profileStatus(state.profile.data);
+    byId('profile-status').textContent = profileStatus(state.profile.data);
     renderFlame();
     renderHotList();
 }
@@ -657,7 +667,7 @@ function profileStatus(data) {
         return 'Sampling is off or still starting. It runs unless the agent is started with sampling=false.';
     }
     const range = PROFILE_WINDOWS.find(option => option.value === state.profile.seconds);
-    return `${plural(data.samples, 'sample', 'samples')} from ${data.source}, one every ${data.intervalMs} ms`
+    return `${countWithNoun(data.samples, 'sample', 'samples')} from ${data.source}, one every ${data.intervalMs} ms`
         + (state.profile.scope ? '' : `, in the last ${range ? range.label : `${state.profile.seconds} s`}`)
         + (data.agentSamples > 0 ? `. QueryScope itself took ${formatCount(data.agentSamples)} more.` : '');
 }
@@ -665,81 +675,83 @@ function profileStatus(data) {
 function renderThreadOptions() {
     const data = state.profile.data;
     const threads = data && data.threads ? data.threads : [];
-    const options = [el('option', {value: 'all'}, 'All threads')];
+    const options = [createElement('option', {value: 'all'}, 'All threads')];
     for (const thread of threads) {
-        options.push(el('option', {value: String(thread.id)}, `${thread.name} · ${formatCount(thread.samples)}`));
+        options.push(createElement('option', {value: String(thread.id)},
+            `${thread.name} · ${formatCount(thread.samples)}`));
     }
     if (state.profile.thread !== 'all' && !threads.some(thread => String(thread.id) === state.profile.thread)) {
-        options.push(el('option', {value: state.profile.thread}, `thread ${state.profile.thread} · 0`));
+        options.push(createElement('option', {value: state.profile.thread}, `thread ${state.profile.thread} · 0`));
     }
-    $('profile-thread').replaceChildren(...options);
-    $('profile-thread').value = state.profile.thread;
+    byId('profile-thread').replaceChildren(...options);
+    byId('profile-thread').value = state.profile.thread;
 }
 
 function renderProfileScope() {
     const scope = state.profile.scope;
-    const box = $('profile-scope');
+    const box = byId('profile-scope');
     box.hidden = scope === null;
     if (!scope) {
         return;
     }
-    const choice = el('div', {class: 'segmented', role: 'group', 'aria-label': 'Scope'});
+    const choice = createElement('div', {class: 'segmented', role: 'group', 'aria-label': 'Scope'});
     box.replaceChildren(
-        el('span', {class: 'scope-label'}, scope.kind === 'request'
+        createElement('span', {class: 'scope-label'}, scope.kind === 'request'
             ? `Samples of one call of ${scope.label}`
             : `Samples of every stored call of ${scope.endpoint}`),
         choice,
-        el('button', {
+        createElement('button', {
             type: 'button',
             class: 'text-button',
             onclick: () => {
                 state.profile.scope = null;
-                state.profile.focus = [];
+                state.profile.zoomPath = [];
                 renderProfileControls();
                 loadProfile();
             },
         }, 'Whole app'));
-    segmented(choice, [{label: 'This call', value: 'request'}, {label: 'All calls', value: 'endpoint'}], scope.kind,
+    renderSegmentedControl(choice,
+        [{label: 'This call', value: 'request'}, {label: 'All calls', value: 'endpoint'}], scope.kind,
         value => {
             scope.kind = value;
-            state.profile.focus = [];
+            state.profile.zoomPath = [];
             loadProfile();
         });
 }
 
 function renderFlame() {
-    const container = $('flame');
+    const container = byId('flame');
     const data = state.profile.data;
     if (!data || !data.root || data.samples === 0) {
         container.style.height = '';
-        container.replaceChildren(el('p', {class: 'empty'}, emptyFlameText(data)));
-        $('profile-reset').hidden = true;
-        $('profile-zoom').textContent = '';
+        container.replaceChildren(createElement('p', {class: 'empty'}, emptyFlameText(data)));
+        byId('profile-reset').hidden = true;
+        byId('profile-zoom').textContent = '';
         return;
     }
     const width = container.clientWidth || 1000;
-    const focus = findFocus(data.root, state.profile.focus);
+    const zoomedNode = findZoomedNode(data.root, state.profile.zoomPath);
     const chain = [];
-    for (let node = focus.parent; node !== null; node = node.parent) {
+    for (let node = zoomedNode.parent; node !== null; node = node.parent) {
         chain.unshift(node);
     }
     const layout = chain.map((node, depth) => ({node, x: 0, width: 1, depth, ancestor: true}));
-    layoutFlame(focus, 0, 1, chain.length, width, layout);
+    layoutFlame(zoomedNode, 0, 1, chain.length, width, layout);
     state.profile.layout = layout;
     const search = state.profile.search.toLowerCase();
     const rows = Math.max(...layout.map(item => item.depth)) + 1;
     container.style.height = `${rows * FLAME_ROW}px`;
     container.replaceChildren(...layout.map((item, index) => {
         const matches = search !== '' && item.node.method.toLowerCase().includes(search);
-        return el('div', {
+        return createElement('div', {
             class: ['flame-node', frameKind(item.node), item.ancestor ? 'ancestor' : '', matches ? 'match' : '',
                 search !== '' && !matches ? 'faded' : ''].join(' '),
             'data-index': String(index),
-            style: {left: percent(item.x), width: percent(item.width), top: `${item.depth * FLAME_ROW}px`},
+            style: {left: cssPercent(item.x), width: cssPercent(item.width), top: `${item.depth * FLAME_ROW}px`},
         }, item.width * width >= FLAME_LABEL_PX ? frameLabel(item.node) : null);
     }));
-    $('profile-reset').hidden = state.profile.focus.length === 0;
-    $('profile-zoom').textContent = focus === data.root ? '' : `Zoomed into ${frameLabel(focus)}`;
+    byId('profile-reset').hidden = state.profile.zoomPath.length === 0;
+    byId('profile-zoom').textContent = zoomedNode === data.root ? '' : `Zoomed into ${frameLabel(zoomedNode)}`;
 }
 
 function layoutFlame(node, x, width, depth, pixels, layout) {
@@ -771,7 +783,7 @@ function emptyFlameText(data) {
     return 'No samples yet. Use the app, or choose a longer time window.';
 }
 
-function findFocus(root, path) {
+function findZoomedNode(root, path) {
     let node = root;
     for (const method of path) {
         const child = node.children.find(candidate => candidate.method === method);
@@ -783,7 +795,7 @@ function findFocus(root, path) {
     return node;
 }
 
-function pathOf(node) {
+function methodPathTo(node) {
     const path = [];
     for (let current = node; current.parent !== null; current = current.parent) {
         path.unshift(current.method);
@@ -796,13 +808,13 @@ function zoomFlame(event) {
     if (!target) {
         return;
     }
-    state.profile.focus = pathOf(state.profile.layout[Number(target.dataset.index)].node);
-    $('flame-tooltip').hidden = true;
+    state.profile.zoomPath = methodPathTo(state.profile.layout[Number(target.dataset.index)].node);
+    byId('flame-tooltip').hidden = true;
     renderFlame();
 }
 
 function hoverFlame(event) {
-    const tooltip = $('flame-tooltip');
+    const tooltip = byId('flame-tooltip');
     const target = event.target.closest('.flame-node');
     if (!target) {
         tooltip.hidden = true;
@@ -812,16 +824,17 @@ function hoverFlame(event) {
     const samples = Math.max(state.profile.data.samples, 1);
     const kind = {app: 'Your code', lib: 'Library or framework', jdk: 'JDK', special: ''}[frameKind(node)];
     tooltip.replaceChildren(...[
-        el('div', {class: 'tooltip-path'}, node.method),
-        el('div', {class: 'tooltip-meta'}, [
-            `${formatCount(node.total)} ${node.total === 1 ? 'sample' : 'samples'}, ${wholePercent(node.total / samples)}`,
+        createElement('div', {class: 'tooltip-path'}, node.method),
+        createElement('div', {class: 'tooltip-meta'}, [
+            `${formatCount(node.total)} ${node.total === 1 ? 'sample' : 'samples'}, `
+                + roundedPercentText(node.total / samples),
             node.self > 0 ? `${formatCount(node.self)} on its own line` : null,
             kind || null,
         ].filter(Boolean).join(' · ')),
-        el('div', {class: 'tooltip-meta'}, 'Click to zoom in'),
+        createElement('div', {class: 'tooltip-meta'}, 'Click to zoom in'),
     ]);
     tooltip.hidden = false;
-    const bounds = $('flame').getBoundingClientRect();
+    const bounds = byId('flame').getBoundingClientRect();
     const mouseX = event.clientX - bounds.left;
     const mouseY = event.clientY - bounds.top;
     tooltip.style.left = `${Math.max(0, Math.min(mouseX + 14, bounds.width - tooltip.offsetWidth))}px`;
@@ -845,24 +858,25 @@ function frameLabel(node) {
 function renderHotList() {
     const data = state.profile.data;
     const yours = state.profile.hotMode === 'app';
-    $('hot-hint').textContent = yours
+    byId('hot-hint').textContent = yours
         ? 'Your methods by the samples taken in them or in library code they call'
         : 'Methods by the samples taken while they were running their own code';
     if (!data || !data.hot || data.samples === 0) {
-        $('hot-list').replaceChildren(el('p', {class: 'empty'}, 'No samples yet.'));
+        byId('hot-list').replaceChildren(createElement('p', {class: 'empty'}, 'No samples yet.'));
         return;
     }
     const methods = yours
-        ? data.hot.filter(method => method.own > 0).sort((a, b) => b.own - a.own)
+        ? data.hot.filter(method => method.selfWithLibraries > 0)
+            .sort((a, b) => b.selfWithLibraries - a.selfWithLibraries)
         : [...data.hot].filter(method => method.self > 0).sort((a, b) => b.self - a.self);
     if (methods.length === 0) {
-        $('hot-list').replaceChildren(el('p', {class: 'empty'}, yours
+        byId('hot-list').replaceChildren(createElement('p', {class: 'empty'}, yours
             ? 'None of your methods were on the CPU in these samples, or QueryScope does not know your package yet.'
             : 'No samples yet.'));
         return;
     }
     const samples = data.samples;
-    const hot = table(
+    const hot = createTable(
         [
             {title: 'Method', width: 'auto'},
             {title: yours ? 'In it and its libraries' : 'Self', width: '170px', number: true},
@@ -870,28 +884,31 @@ function renderHotList() {
             {title: 'Share of samples', width: '22%'},
         ],
         methods.slice(0, HOT_ROWS).map(method => {
-            const count = yours ? method.own : method.self;
-            return el('tr', {
+            const count = yours ? method.selfWithLibraries : method.self;
+            return createElement('tr', {
                     class: 'clickable',
                     onclick: () => {
                         state.profile.search = method.method;
-                        $('profile-search').value = method.method;
+                        byId('profile-search').value = method.method;
                         renderFlame();
-                        $('flame').scrollIntoView({block: 'center', behavior: 'smooth'});
+                        byId('flame').scrollIntoView({block: 'center', behavior: 'smooth'});
                     },
                 },
-                el('td', {}, el('div', {class: 'call-name'},
-                    el('code', {title: method.method}, method.app ? shortMethod(method.method) : method.method),
-                    method.app ? el('span', {class: 'label your-code'}, 'Your code') : null)),
-                el('td', {class: 'number'}, `${(count * 100 / samples).toFixed(1)}%`),
-                el('td', {class: 'number'}, `${(method.total * 100 / samples).toFixed(1)}%`),
-                el('td', {},
-                    el('div', {class: 'call-share'},
-                        el('div', {class: 'call-share-total', style: {width: percent(method.total / samples)}}),
-                        el('div', {class: 'call-share-self', style: {width: percent(count / samples)}}))));
+                createElement('td', {}, createElement('div', {class: 'call-name'},
+                    createElement('code', {title: method.method},
+                        method.app ? shortMethod(method.method) : method.method),
+                    method.app ? createElement('span', {class: 'label your-code'}, 'Your code') : null)),
+                createElement('td', {class: 'number'}, `${(count * 100 / samples).toFixed(1)}%`),
+                createElement('td', {class: 'number'}, `${(method.total * 100 / samples).toFixed(1)}%`),
+                createElement('td', {},
+                    createElement('div', {class: 'call-share'},
+                        createElement('div',
+                            {class: 'call-share-total', style: {width: cssPercent(method.total / samples)}}),
+                        createElement('div',
+                            {class: 'call-share-self', style: {width: cssPercent(count / samples)}}))));
         }));
     hot.classList.add('call-table');
-    $('hot-list').replaceChildren(hot);
+    byId('hot-list').replaceChildren(hot);
 }
 
 function laneCount() {
@@ -925,16 +942,16 @@ function assignLane(report) {
 }
 
 function drawStream() {
-    const context = prepare(streamCanvas);
+    const context = resetCanvas(streamCanvas);
     if (!context) {
         return;
     }
     const {width, height} = context.size;
-    const end = now();
+    const end = displayTime();
     const from = end - state.windowMs;
     const x = time => (time - from) / state.windowMs * width;
 
-    context.font = `11px ${COLORS.mono}`;
+    context.font = `11px ${FONTS.mono}`;
     context.textAlign = 'right';
     for (let step = 0; step <= 6; step++) {
         const gridX = Math.round(width - step * width / 6) - 0.5;
@@ -977,14 +994,14 @@ function drawStream() {
         context.globalAlpha = 1;
         hits.push({id: report.id, report, left, top, right: left + bar, bottom: top + BAR_HEIGHT});
     }
-    state.hits = hits;
+    state.streamHitBoxes = hits;
 }
 
-function hover(event) {
+function hoverLiveStream(event) {
     const bounds = streamCanvas.getBoundingClientRect();
     const mouseX = event.clientX - bounds.left;
     const mouseY = event.clientY - bounds.top;
-    const hit = [...state.hits].reverse().find(box =>
+    const hit = [...state.streamHitBoxes].reverse().find(box =>
         mouseX >= box.left - 3 && mouseX <= box.right + 3 && mouseY >= box.top - 4 && mouseY <= box.bottom + 4);
     state.hoverId = hit ? hit.id : null;
     streamCanvas.classList.toggle('pointing', Boolean(hit));
@@ -994,15 +1011,15 @@ function hover(event) {
     }
     const report = hit.report;
     tooltip.replaceChildren(...[
-        el('div', {class: 'tooltip-path'}, `${report.method} ${report.path}`),
-        el('div', {class: 'tooltip-meta'}, [
+        createElement('div', {class: 'tooltip-path'}, `${report.method} ${report.path}`),
+        createElement('div', {class: 'tooltip-meta'}, [
             isTask(report) ? 'Task' : `HTTP ${report.status}`,
             formatMs(report.durationMs),
-            plural(report.view.queryCount, 'query', 'queries'),
+            countWithNoun(report.view.queryCount, 'query', 'queries'),
             `${formatMs(report.view.dbMs)} in database`,
         ].join(' · ')),
         report.view.sqlFindings.length > 0
-            ? el('div', {class: 'tooltip-meta'}, report.view.sqlFindings.map(findingLabel))
+            ? createElement('div', {class: 'tooltip-meta'}, report.view.sqlFindings.map(createFindingLabel))
             : null,
     ].filter(Boolean));
     tooltip.hidden = false;
@@ -1029,10 +1046,11 @@ function renderEndpoints() {
     }
     const top = [...groups.values()].sort((a, b) => b.db - a.db).slice(0, TOP_ENDPOINTS);
     if (top.length === 0) {
-        $('endpoints').replaceChildren(el('p', {class: 'empty'}, 'Endpoints appear here after their first request.'));
+        byId('endpoints').replaceChildren(
+            createElement('p', {class: 'empty'}, 'Endpoints appear here after their first request.'));
         return;
     }
-    $('endpoints').replaceChildren(table(
+    byId('endpoints').replaceChildren(createTable(
         [
             {title: 'Endpoint or task', width: 'auto'},
             {title: 'Calls', width: '70px', number: true},
@@ -1041,220 +1059,225 @@ function renderEndpoints() {
             {title: 'Database time', width: '120px', number: true},
             {title: 'Findings', width: '190px'},
         ],
-        top.map(group => el('tr', {class: 'clickable', onclick: () => openRequest(group.latestId)},
-            el('td', {class: 'mono ellipsis', title: group.path}, el('span', {class: 'method'}, group.method), group.path),
-            el('td', {class: 'number'}, String(group.calls)),
-            el('td', {class: 'number'}, (group.queries / group.calls).toFixed(1)),
-            el('td', {class: 'number'}, formatMs(group.duration / group.calls)),
-            el('td', {class: 'number'}, formatMs(group.db)),
-            el('td', {}, group.types.size === 0 ? '—' : Object.keys(FINDING_TYPES)
+        top.map(group => createElement('tr', {class: 'clickable', onclick: () => openRequest(group.latestId)},
+            createElement('td', {class: 'mono ellipsis', title: group.path},
+                createElement('span', {class: 'method'}, group.method), group.path),
+            createElement('td', {class: 'number'}, String(group.calls)),
+            createElement('td', {class: 'number'}, (group.queries / group.calls).toFixed(1)),
+            createElement('td', {class: 'number'}, formatMs(group.duration / group.calls)),
+            createElement('td', {class: 'number'}, formatMs(group.db)),
+            createElement('td', {}, group.types.size === 0 ? '—' : Object.keys(FINDING_TYPES)
                 .filter(type => group.types.has(type))
-                .map(type => el('span', {class: `label ${FINDING_TYPES[type].css}`}, FINDING_TYPES[type].name)))))));
+                .map(type => createElement('span', {class: `label ${FINDING_TYPES[type].css}`},
+                    FINDING_TYPES[type].name)))))));
 }
 
 function renderFeed() {
     const items = state.sqlReports
         .flatMap(report => report.view.sqlFindings.map(finding => ({report, finding})))
         .slice(0, FEED_SIZE);
-    state.feedTimes = [];
+    state.feedAgeCells = [];
     if (items.length === 0) {
-        $('findings-feed').replaceChildren(el('p', {class: 'empty'}, 'No findings so far.'));
+        byId('findings-feed').replaceChildren(createElement('p', {class: 'empty'}, 'No findings so far.'));
         return;
     }
-    const current = now();
-    $('findings-feed').replaceChildren(table(
+    const current = displayTime();
+    byId('findings-feed').replaceChildren(createTable(
         [
             {title: 'When', width: '80px'},
             {title: 'Finding', width: '130px'},
             {title: 'Request and location', width: 'auto'},
         ],
         items.slice(0, FEED_SIZE).map(({report, finding}) => {
-            const time = el('td', {}, ago(current - report.view.end));
-            state.feedTimes.push({node: time, end: report.view.end});
-            return el('tr', {class: 'clickable', onclick: () => openRequest(report.id)},
+            const time = createElement('td', {}, timeAgo(current - report.view.end));
+            state.feedAgeCells.push({node: time, end: report.view.end});
+            return createElement('tr', {class: 'clickable', onclick: () => openRequest(report.id)},
                 time,
-                el('td', {}, findingLabel(finding)),
-                el('td', {class: 'ellipsis'},
-                    el('div', {class: 'path', title: report.path}, `${report.method} ${report.path}`),
-                    el('div', {class: 'path', title: finding.callSite ?? finding.method ?? ''},
-                        el('span', {class: 'muted'}, findingLocation(finding)))));
+                createElement('td', {}, createFindingLabel(finding)),
+                createElement('td', {class: 'ellipsis'},
+                    createElement('div', {class: 'path', title: report.path}, `${report.method} ${report.path}`),
+                    createElement('div', {class: 'path', title: finding.callSite ?? finding.method ?? ''},
+                        createElement('span', {class: 'muted'}, findingLocation(finding)))));
         })));
 }
 
-function table(columns, rows) {
-    return el('table', {},
-        el('colgroup', {}, columns.map(column => el('col', {style: {width: column.width}}))),
-        el('thead', {}, el('tr', {}, columns.map(column =>
-            el('th', {class: column.number ? 'number' : ''}, column.title)))),
-        el('tbody', {}, rows));
+function createTable(columns, rows) {
+    return createElement('table', {},
+        createElement('colgroup', {}, columns.map(column => createElement('col', {style: {width: column.width}}))),
+        createElement('thead', {}, createElement('tr', {}, columns.map(column =>
+            createElement('th', {class: column.number ? 'number' : ''}, column.title)))),
+        createElement('tbody', {}, rows));
 }
 
-function announce(report) {
-    const finding = report.findings.find(candidate => !state.announced.has(findingKey(report, candidate)));
+function announceNewFinding(report) {
+    const finding = report.findings.find(candidate => !state.announcedFindingKeys.has(findingKey(report, candidate)));
     if (!finding) {
         return;
     }
-    report.findings.forEach(candidate => state.announced.add(findingKey(report, candidate)));
-    $('snackbar-action').onclick = () => {
-        $('snackbar').hidden = true;
+    report.findings.forEach(candidate => state.announcedFindingKeys.add(findingKey(report, candidate)));
+    byId('snackbar-action').onclick = () => {
+        byId('snackbar').hidden = true;
         openFinding(report, finding);
     };
-    $('snackbar-action').hidden = false;
+    byId('snackbar-action').hidden = false;
     showSnackbar(`New finding: ${findingText(finding)} in ${report.method} ${report.view.endpointPath}`, SNACK_MS);
 }
 
-function renderRequests() {
+function renderRequestList() {
     const visible = state.sqlReports.filter(report => !state.onlyFindings || report.view.sqlFindings.length > 0);
-    if (state.follow || !visible.some(report => report.id === state.selectedId)) {
-        state.selectedId = visible.length > 0 ? visible[0].id : null;
+    if (state.followNewestRequest || !visible.some(report => report.id === state.selectedRequestId)) {
+        state.selectedRequestId = visible.length > 0 ? visible[0].id : null;
     }
-    $('request-list').replaceChildren(...visible.map((report, index) => requestItem(report, index)));
-    $('no-requests').hidden = visible.length > 0;
-    $('no-requests').textContent = state.sqlReports.length > 0
+    byId('request-list').replaceChildren(...visible.map((report, index) => createRequestListItem(report, index)));
+    byId('no-requests').hidden = visible.length > 0;
+    byId('no-requests').textContent = state.sqlReports.length > 0
         ? 'No requests with findings yet.'
         : 'Waiting for requests or tasks that run SQL.';
-    const selected = state.sqlReports.find(report => report.id === state.selectedId) ?? null;
-    if ((selected?.id ?? null) !== state.renderedId) {
-        renderDetails(selected);
-        state.renderedId = selected?.id ?? null;
+    const selected = state.sqlReports.find(report => report.id === state.selectedRequestId) ?? null;
+    if ((selected?.id ?? null) !== state.renderedRequestId) {
+        renderRequestDetails(selected);
+        state.renderedRequestId = selected?.id ?? null;
     }
 }
 
-function requestItem(report, index) {
-    return el('li', {
-            class: `request${report.id === state.selectedId ? ' selected' : ''}`,
+function createRequestListItem(report, index) {
+    return createElement('li', {
+            class: `request${report.id === state.selectedRequestId ? ' selected' : ''}`,
             onclick: () => {
-                state.selectedId = report.id;
-                state.follow = index === 0;
-                render();
+                state.selectedRequestId = report.id;
+                state.followNewestRequest = index === 0;
+                renderAll();
             },
         },
-        el('div', {class: 'request-line'},
-            el('span', {class: 'method'}, report.method),
-            el('span', {class: 'path', title: report.path}, report.path)),
-        el('div', {class: 'request-meta'},
+        createElement('div', {class: 'request-line'},
+            createElement('span', {class: 'method'}, report.method),
+            createElement('span', {class: 'path', title: report.path}, report.path)),
+        createElement('div', {class: 'request-meta'},
             isTask(report)
-                ? el('span', {}, 'Task')
-                : el('span', {class: report.status >= 400 ? 'status-error' : ''}, String(report.status)),
-            el('span', {}, plural(report.view.queryCount, 'query', 'queries')),
-            el('span', {}, formatMs(report.durationMs)),
-            report.view.sqlFindings.map(findingLabel)));
+                ? createElement('span', {}, 'Task')
+                : createElement('span', {class: report.status >= 400 ? 'status-error' : ''}, String(report.status)),
+            createElement('span', {}, countWithNoun(report.view.queryCount, 'query', 'queries')),
+            createElement('span', {}, formatMs(report.durationMs)),
+            report.view.sqlFindings.map(createFindingLabel)));
 }
 
-function renderDetails(report) {
+function renderRequestDetails(report) {
     if (!report) {
-        $('details').replaceChildren(el('div', {class: 'panel'},
-            el('p', {class: 'empty', style: {paddingTop: '20px'}}, 'Select a request to see its queries.')));
+        byId('details').replaceChildren(createElement('div', {class: 'panel'},
+            createElement('p', {class: 'empty', style: {paddingTop: '20px'}}, 'Select a request to see its queries.')));
         return;
     }
-    const roles = queryRoles(report);
-    $('details').replaceChildren(
-        el('div', {class: 'panel details-header'},
-            el('div', {class: 'details-title'},
-                el('h1', {}, el('span', {class: 'method'}, report.method), report.path),
-                report.methods > 0
-                    ? el('button', {type: 'button', class: 'text-button', onclick: () => openCalls(report.id)},
+    const highlights = queryHighlightClasses(report);
+    byId('details').replaceChildren(
+        createElement('div', {class: 'panel details-header'},
+            createElement('div', {class: 'details-title'},
+                createElement('h1', {}, createElement('span', {class: 'method'}, report.method), report.path),
+                report.methodCount > 0
+                    ? createElement('button',
+                        {type: 'button', class: 'text-button', onclick: () => openCalls(report.id)},
                         'Call tree')
                     : null),
-            el('dl', {class: 'facts'},
-                isTask(report) ? fact('Kind', 'Task outside HTTP') : fact('Status', String(report.status)),
-                fact('Duration', formatMs(report.durationMs)),
-                fact('Queries', formatCount(report.view.queryCount)),
-                fact('Time in database', formatMs(report.view.dbMs)),
-                fact('Started', new Date(report.view.start).toLocaleTimeString()))),
-        el('h3', {class: 'section-title'}, 'Findings'),
-        ...findingCards(report.view.sqlFindings, 'No SQL findings in this request.'),
-        el('h3', {class: 'section-title'}, 'Timeline'),
-        timeline(report, roles),
-        el('h3', {class: 'section-title'}, 'Queries'),
-        ...(report.omittedQueries > 0 ? [el('p', {class: 'empty'},
+            createElement('dl', {class: 'facts'},
+                isTask(report) ? createFact('Kind', 'Task outside HTTP') : createFact('Status', String(report.status)),
+                createFact('Duration', formatMs(report.durationMs)),
+                createFact('Queries', formatCount(report.view.queryCount)),
+                createFact('Time in database', formatMs(report.view.dbMs)),
+                createFact('Started', new Date(report.view.start).toLocaleTimeString()))),
+        createElement('h3', {class: 'section-title'}, 'Findings'),
+        ...createFindingCards(report.view.sqlFindings, 'No SQL findings in this request.'),
+        createElement('h3', {class: 'section-title'}, 'Timeline'),
+        createTimeline(report, highlights),
+        createElement('h3', {class: 'section-title'}, 'Queries'),
+        ...(report.omittedQueries > 0 ? [createElement('p', {class: 'empty'},
             `First ${formatCount(report.queries.length)} of ${formatCount(report.view.queryCount)} queries.`
             + ' The rest count in the totals but are not listed.')] : []),
-        queryTable(report, roles));
+        createQueryTable(report, highlights));
 }
 
-function renderCalls() {
+function renderCallTreeList() {
     const visible = state.javaReports.filter(report => !state.onlySlowCode || report.view.javaFindings.length > 0);
-    if (state.callFollow || !visible.some(report => report.id === state.callSelectedId)) {
-        state.callSelectedId = visible.length > 0 ? visible[0].id : null;
+    if (state.followNewestCallTree || !visible.some(report => report.id === state.selectedCallTreeId)) {
+        state.selectedCallTreeId = visible.length > 0 ? visible[0].id : null;
     }
-    $('call-list').replaceChildren(...visible.map((report, index) => callItem(report, index)));
-    $('no-calls').hidden = visible.length > 0;
-    $('no-calls').textContent = state.javaReports.length > 0
+    byId('call-list').replaceChildren(...visible.map((report, index) => createCallTreeListItem(report, index)));
+    byId('no-calls').hidden = visible.length > 0;
+    byId('no-calls').textContent = state.javaReports.length > 0
         ? 'No requests with slow code yet.'
         : 'Waiting for requests or tasks that run your code.';
-    const selected = state.javaReports.find(report => report.id === state.callSelectedId) ?? null;
-    if ((selected?.id ?? null) !== state.callRenderedId) {
-        renderCallDetails(selected);
-        state.callRenderedId = selected?.id ?? null;
+    const selected = state.javaReports.find(report => report.id === state.selectedCallTreeId) ?? null;
+    if ((selected?.id ?? null) !== state.renderedCallTreeId) {
+        renderCallTreeDetails(selected);
+        state.renderedCallTreeId = selected?.id ?? null;
     }
 }
 
-function callItem(report, index) {
-    return el('li', {
-            class: `request${report.id === state.callSelectedId ? ' selected' : ''}`,
+function createCallTreeListItem(report, index) {
+    return createElement('li', {
+            class: `request${report.id === state.selectedCallTreeId ? ' selected' : ''}`,
             onclick: () => {
-                state.callSelectedId = report.id;
-                state.callFollow = index === 0;
-                render();
+                state.selectedCallTreeId = report.id;
+                state.followNewestCallTree = index === 0;
+                renderAll();
             },
         },
-        el('div', {class: 'request-line'},
-            el('span', {class: 'method'}, report.method),
-            el('span', {class: 'path', title: report.path}, report.path)),
-        el('div', {class: 'request-meta'},
+        createElement('div', {class: 'request-line'},
+            createElement('span', {class: 'method'}, report.method),
+            createElement('span', {class: 'path', title: report.path}, report.path)),
+        createElement('div', {class: 'request-meta'},
             isTask(report)
-                ? el('span', {}, 'Task')
-                : el('span', {class: report.status >= 400 ? 'status-error' : ''}, String(report.status)),
-            el('span', {}, formatMs(report.durationMs)),
-            el('span', {}, plural(report.methods, 'method', 'methods')),
-            report.view.javaFindings.map(findingLabel)));
+                ? createElement('span', {}, 'Task')
+                : createElement('span', {class: report.status >= 400 ? 'status-error' : ''}, String(report.status)),
+            createElement('span', {}, formatMs(report.durationMs)),
+            createElement('span', {}, countWithNoun(report.methodCount, 'method', 'methods')),
+            report.view.javaFindings.map(createFindingLabel)));
 }
 
-function renderCallDetails(report) {
+function renderCallTreeDetails(report) {
     if (!report) {
-        $('call-details').replaceChildren(el('div', {class: 'panel'},
-            el('p', {class: 'empty', style: {paddingTop: '20px'}}, 'Select a request to see its call tree.')));
+        byId('call-details').replaceChildren(createElement('div', {class: 'panel'},
+            createElement('p', {class: 'empty', style: {paddingTop: '20px'}},
+                'Select a request to see its call tree.')));
         return;
     }
-    $('call-details').replaceChildren(
-        el('div', {class: 'panel details-header'},
-            el('div', {class: 'details-title'},
-                el('h1', {}, el('span', {class: 'method'}, report.method), report.path),
-                el('div', {class: 'details-actions'},
-                    el('button', {type: 'button', class: 'text-button', onclick: () => openProfile(report)},
+    byId('call-details').replaceChildren(
+        createElement('div', {class: 'panel details-header'},
+            createElement('div', {class: 'details-title'},
+                createElement('h1', {}, createElement('span', {class: 'method'}, report.method), report.path),
+                createElement('div', {class: 'details-actions'},
+                    createElement('button', {type: 'button', class: 'text-button', onclick: () => openProfile(report)},
                         'CPU samples'),
                     report.view.hasSql
-                        ? el('button', {type: 'button', class: 'text-button', onclick: () => openRequest(report.id)},
+                        ? createElement('button',
+                            {type: 'button', class: 'text-button', onclick: () => openRequest(report.id)},
                             'SQL queries')
                         : null)),
-            el('dl', {class: 'facts', id: 'call-facts'}, callFacts(report, null))),
-        el('h3', {class: 'section-title'}, 'Findings'),
-        ...findingCards(report.view.javaFindings, 'No slow code in this request.'),
-        el('h3', {class: 'section-title'}, 'Call tree'),
-        el('div', {class: 'panel call-tree', id: 'call-tree', 'data-id': report.id},
-            el('p', {class: 'empty', style: {paddingTop: '20px'}}, 'Loading the call tree…')),
-        el('h3', {class: 'section-title', id: 'method-queries-title'}, 'Queries of a method'),
-        el('div', {class: 'panel', id: 'method-queries'},
-            el('p', {class: 'empty', style: {paddingTop: '20px'}}, report.view.hasSql
+            createElement('dl', {class: 'facts', id: 'call-facts'}, createCallTreeFacts(report, null))),
+        createElement('h3', {class: 'section-title'}, 'Findings'),
+        ...createFindingCards(report.view.javaFindings, 'No slow code in this request.'),
+        createElement('h3', {class: 'section-title'}, 'Call tree'),
+        createElement('div', {class: 'panel call-tree', id: 'call-tree', 'data-id': report.id},
+            createElement('p', {class: 'empty', style: {paddingTop: '20px'}}, 'Loading the call tree…')),
+        createElement('h3', {class: 'section-title', id: 'method-queries-title'}, 'Queries of a method'),
+        createElement('div', {class: 'panel', id: 'method-queries'},
+            createElement('p', {class: 'empty', style: {paddingTop: '20px'}}, report.view.hasSql
                 ? 'Select a method with queries in the call tree to see its SQL here.'
                 : 'This request ran no SQL.')),
-        el('h3', {class: 'section-title'}, 'Methods by self time'),
-        el('div', {class: 'panel', id: 'hot-methods'},
-            el('p', {class: 'empty', style: {paddingTop: '20px'}}, 'Loading…')));
-    state.callToggles = new Map();
+        createElement('h3', {class: 'section-title'}, 'Methods by self time'),
+        createElement('div', {class: 'panel', id: 'hot-methods'},
+            createElement('p', {class: 'empty', style: {paddingTop: '20px'}}, 'Loading…')));
+    state.callTreeExpanded = new Map();
     loadCallTree(report);
 }
 
-function callFacts(report, tree) {
+function createCallTreeFacts(report, tree) {
     const ownMs = tree && tree.methods ? tree.methods.reduce((sum, node) => sum + node.totalMs, 0) : null;
     return [
-        isTask(report) ? fact('Kind', 'Task outside HTTP') : fact('Status', String(report.status)),
-        fact('Duration', formatMs(report.durationMs)),
-        fact('In your code', ownMs === null ? '…' : formatMs(Math.min(ownMs, report.durationMs))),
-        fact('In SQL', formatMs(report.view.dbMs)),
-        fact('Methods', String(report.methods)),
-        fact('Started', new Date(report.view.start).toLocaleTimeString()),
+        isTask(report) ? createFact('Kind', 'Task outside HTTP') : createFact('Status', String(report.status)),
+        createFact('Duration', formatMs(report.durationMs)),
+        createFact('In your code', ownMs === null ? '…' : formatMs(Math.min(ownMs, report.durationMs))),
+        createFact('In SQL', formatMs(report.view.dbMs)),
+        createFact('Methods', String(report.methodCount)),
+        createFact('Started', new Date(report.view.start).toLocaleTimeString()),
     ];
 }
 
@@ -1272,27 +1295,27 @@ async function loadCallTree(report) {
             tree = {failed: true};
         }
     }
-    const container = $('call-tree');
+    const container = byId('call-tree');
     if (!container || container.dataset.id !== String(report.id)) {
         return;
     }
-    const roles = queryRoles(report);
-    renderCallTree(report, tree, roles);
+    const highlights = queryHighlightClasses(report);
+    renderCallTree(report, tree, highlights);
     if (tree.methods) {
-        $('call-facts').replaceChildren(...callFacts(report, tree));
+        byId('call-facts').replaceChildren(...createCallTreeFacts(report, tree));
         renderHotMethods(report, tree);
     } else {
-        $('hot-methods').replaceChildren(el('p', {class: 'empty', style: {paddingTop: '20px'}}, '—'));
+        byId('hot-methods').replaceChildren(createElement('p', {class: 'empty', style: {paddingTop: '20px'}}, '—'));
     }
 }
 
-function renderCallTree(report, tree, roles) {
-    const container = $('call-tree');
+function renderCallTree(report, tree, highlights) {
+    const container = byId('call-tree');
     if (!container || container.dataset.id !== String(report.id)) {
         return;
     }
     const unit = isTask(report) ? 'task' : 'request';
-    const message = text => [el('p', {class: 'empty', style: {paddingTop: '20px'}}, text)];
+    const message = text => [createElement('p', {class: 'empty', style: {paddingTop: '20px'}}, text)];
     if (tree.missing || tree.failed) {
         container.replaceChildren(...message(tree.missing
             ? `The agent no longer keeps this ${unit}.`
@@ -1320,14 +1343,14 @@ function renderCallTree(report, tree, roles) {
     };
     const context = {
         report,
-        roles,
+        highlights,
         duration: Math.max(report.durationMs, 0.001),
         slowMethods: new Set(report.findings.filter(finding => finding.type === 'slowMethod').map(finding => finding.method)),
-        rerender: () => renderCallTree(report, tree, roles),
+        rerender: () => renderCallTree(report, tree, highlights),
     };
     const rows = [];
-    callRows(root, 0, 'root', context, rows);
-    const calls = table(
+    appendCallTreeRows(root, 0, 'root', context, rows);
+    const calls = createTable(
         [
             {title: 'Method', width: 'auto'},
             {title: 'Calls', width: '80px', number: true},
@@ -1340,88 +1363,97 @@ function renderCallTree(report, tree, roles) {
     calls.classList.add('call-table');
     container.replaceChildren(...[
         tree.warmUp
-            ? el('p', {class: 'call-warm-up'}, `The JVM loaded ${formatCount(tree.classesLoaded)} classes while this `
+            ? createElement('p', {class: 'call-warm-up'},
+                `The JVM loaded ${formatCount(tree.classesLoaded)} classes while this `
                 + `${unit} ran, so its times include warm-up and slow methods are not reported for it.`)
             : null,
         calls,
         tree.truncated
-            ? el('p', {class: 'empty'}, 'The tree stops at 1,000 methods or 100 levels, the rest is counted in the method above.')
+            ? createElement('p', {class: 'empty'},
+                'The tree stops at 1,000 methods or 100 levels, the rest is counted in the method above.')
             : null,
     ].filter(node => node !== null));
 }
 
-function callRows(node, depth, path, context, rows) {
-    rows.push(callRow(node, depth, path, context));
+function appendCallTreeRows(node, depth, path, context, rows) {
+    rows.push(createCallTreeRow(node, depth, path, context));
     if (isExpanded(node, depth, path, context)) {
-        node.children.forEach((child, index) => callRows(child, depth + 1, `${path}/${index}`, context, rows));
+        node.children.forEach((child, index) =>
+            appendCallTreeRows(child, depth + 1, `${path}/${index}`, context, rows));
     }
 }
 
-function callRow(node, depth, path, context) {
+function createCallTreeRow(node, depth, path, context) {
     const hasChildren = node.children.length > 0;
     const expanded = hasChildren && isExpanded(node, depth, path, context);
     const queries = node.queryIndexes.length;
-    const role = ROLE_PRIORITY.map(type => FINDING_TYPES[type].css)
-        .find(css => node.queryIndexes.some(index => context.roles[index] === css));
+    const role = HIGHLIGHT_PRIORITY.map(type => FINDING_TYPES[type].css)
+        .find(css => node.queryIndexes.some(index => context.highlights[index] === css));
     const slow = node.method !== null && !node.startedBeforeUnit && context.slowMethods.has(node.method);
     const name = node.method === null
-        ? el('span', {class: 'call-unit'}, isTask(context.report)
+        ? createElement('span', {class: 'call-unit'}, isTask(context.report)
             ? `Task ${context.report.path}`
             : `${context.report.method} ${context.report.path}`)
-        : el('code', {title: node.method}, shortMethod(node.method));
+        : createElement('code', {title: node.method}, shortMethod(node.method));
     const properties = {class: ['call-row', queries > 0 ? 'clickable' : '', slow ? 'slow-method' : ''].join(' ')};
     if (queries > 0) {
-        properties.onclick = () => showMethodQueries(context.report, node, context.roles);
+        properties.onclick = () => showMethodQueries(context.report, node, context.highlights);
     }
-    return el('tr', properties,
-        el('td', {style: {paddingLeft: `${20 + depth * CALL_INDENT}px`}}, el('div', {class: 'call-name'},
+    return createElement('tr', properties,
+        createElement('td', {style: {paddingLeft: `${20 + depth * CALL_INDENT}px`}}, createElement('div', {class: 'call-name'},
             hasChildren
-                ? el('button', {
+                ? createElement('button', {
                     class: 'call-toggle',
                     'aria-expanded': String(expanded),
                     'aria-label': expanded ? 'Collapse' : 'Expand',
                     onclick: event => {
                         event.stopPropagation();
-                        state.callToggles.set(path, !expanded);
+                        state.callTreeExpanded.set(path, !expanded);
                         context.rerender();
                     },
                 }, expanded ? '▾' : '▸')
-                : el('span', {class: 'call-toggle'}),
+                : createElement('span', {class: 'call-toggle'}),
             name,
             node.startedBeforeUnit
-                ? el('span', {class: 'call-note', title: 'This method was already running when the task started, '
+                ? createElement('span', {class: 'call-note',
+                        title: 'This method was already running when the task started, '
                         + 'so only the time inside the task is counted.'}, 'already running')
                 : null,
-            slow ? el('span', {class: 'label slow-method'}, 'Slow code') : null)),
-        el('td', {class: 'number'}, formatCount(node.calls)),
-        el('td', {class: 'number'}, formatMs(node.totalMs)),
-        el('td', {
+            slow ? createElement('span', {class: 'label slow-method'}, 'Slow code') : null)),
+        createElement('td', {class: 'number'}, formatCount(node.calls)),
+        createElement('td', {class: 'number'}, formatMs(node.totalMs)),
+        createElement('td', {
             class: 'number',
             title: node.method === null ? 'Time outside your methods: the framework, the server and the database driver' : '',
         }, formatMs(node.selfMs)),
-        el('td', {class: 'number', title: queries > 0 ? 'Click the row to see these queries below' : ''},
-            queries > 0 ? el('span', {class: `call-queries ${role ?? ''}`}, String(queries)) : '—'),
-        el('td', {},
-            el('div', {class: 'call-share', title: `${wholePercent(node.totalMs / context.duration)} in total, `
-                    + `${wholePercent(node.selfMs / context.duration)} in its own code`},
-                el('div', {class: 'call-share-total', style: {width: percent(node.totalMs / context.duration)}}),
-                el('div', {class: 'call-share-self', style: {width: percent(node.selfMs / context.duration)}}))));
+        createElement('td', {class: 'number', title: queries > 0 ? 'Click the row to see these queries below' : ''},
+            queries > 0 ? createElement('span', {class: `call-queries ${role ?? ''}`}, String(queries)) : '—'),
+        createElement('td', {},
+            createElement('div', {class: 'call-share',
+                    title: `${roundedPercentText(node.totalMs / context.duration)} in total, `
+                    + `${roundedPercentText(node.selfMs / context.duration)} in its own code`},
+                createElement('div',
+                    {class: 'call-share-total', style: {width: cssPercent(node.totalMs / context.duration)}}),
+                createElement('div',
+                    {class: 'call-share-self', style: {width: cssPercent(node.selfMs / context.duration)}}))));
 }
 
-function showMethodQueries(report, node, roles) {
+function showMethodQueries(report, node, highlights) {
     const title = node.method === null ? 'outside your methods' : shortMethod(node.method);
-    $('method-queries-title').textContent = `Queries of ${title}`;
+    byId('method-queries-title').textContent = `Queries of ${title}`;
     const rows = node.queryIndexes.map(index => {
         const query = report.queries[index];
-        return el('tr', {class: roles[index]},
-            el('td', {class: 'number'}, String(index + 1)),
-            el('td', {class: 'number'}, formatMs(query.durationMs)),
-            el('td', {class: 'number'}, query.rows === null || query.rows === undefined ? '—' : formatCount(query.rows)),
-            el('td', {class: 'sql', title: oneLine(query.sql)},
-                query.failed ? el('span', {class: 'status-error'}, 'Failed ') : null, highlightSql(oneLine(query.sql))),
-            el('td', {class: 'params', title: query.parameters || ''}, query.parameters || '—'));
+        return createElement('tr', {class: highlights[index]},
+            createElement('td', {class: 'number'}, String(index + 1)),
+            createElement('td', {class: 'number'}, formatMs(query.durationMs)),
+            createElement('td', {class: 'number'},
+                query.rows === null || query.rows === undefined ? '—' : formatCount(query.rows)),
+            createElement('td', {class: 'sql', title: collapseWhitespace(query.sql)},
+                query.failed ? createElement('span', {class: 'status-error'}, 'Failed ') : null,
+                highlightSql(collapseWhitespace(query.sql))),
+            createElement('td', {class: 'params', title: query.parameters || ''}, query.parameters || '—'));
     });
-    const queries = table(
+    const queries = createTable(
         [
             {title: '#', width: '52px', number: true},
             {title: 'Duration', width: '90px', number: true},
@@ -1431,8 +1463,8 @@ function showMethodQueries(report, node, roles) {
         ],
         rows);
     queries.classList.add('query-table');
-    $('method-queries').replaceChildren(queries);
-    $('method-queries-title').scrollIntoView({block: 'start', behavior: 'smooth'});
+    byId('method-queries').replaceChildren(queries);
+    byId('method-queries-title').scrollIntoView({block: 'start', behavior: 'smooth'});
 }
 
 function renderHotMethods(report, tree) {
@@ -1449,7 +1481,7 @@ function renderHotMethods(report, tree) {
     const duration = Math.max(report.durationMs, 0.001);
     const slow = new Set(report.view.javaFindings.map(finding => finding.method));
     const top = [...methods.values()].sort((a, b) => b.selfMs - a.selfMs).slice(0, HOT_METHODS);
-    const hot = table(
+    const hot = createTable(
         [
             {title: 'Method', width: 'auto'},
             {title: 'Calls', width: '80px', number: true},
@@ -1457,26 +1489,28 @@ function renderHotMethods(report, tree) {
             {title: 'Queries', width: '80px', number: true},
             {title: 'Share of time', width: '18%'},
         ],
-        top.map(entry => el('tr', {class: slow.has(entry.method) ? 'slow-method' : ''},
-            el('td', {}, el('div', {class: 'call-name'},
-                el('code', {title: entry.method}, shortMethod(entry.method)),
-                slow.has(entry.method) ? el('span', {class: 'label slow-method'}, 'Slow code') : null)),
-            el('td', {class: 'number'}, formatCount(entry.calls)),
-            el('td', {class: 'number'}, formatMs(entry.selfMs)),
-            el('td', {class: 'number'}, entry.queries > 0 ? String(entry.queries) : '—'),
-            el('td', {},
-                el('div', {class: 'call-share', title: `${wholePercent(entry.selfMs / duration)} of the time`},
-                    el('div', {class: 'call-share-self', style: {width: percent(entry.selfMs / duration)}}))))));
+        top.map(entry => createElement('tr', {class: slow.has(entry.method) ? 'slow-method' : ''},
+            createElement('td', {}, createElement('div', {class: 'call-name'},
+                createElement('code', {title: entry.method}, shortMethod(entry.method)),
+                slow.has(entry.method) ? createElement('span', {class: 'label slow-method'}, 'Slow code') : null)),
+            createElement('td', {class: 'number'}, formatCount(entry.calls)),
+            createElement('td', {class: 'number'}, formatMs(entry.selfMs)),
+            createElement('td', {class: 'number'}, entry.queries > 0 ? String(entry.queries) : '—'),
+            createElement('td', {},
+                createElement('div',
+                    {class: 'call-share', title: `${roundedPercentText(entry.selfMs / duration)} of the time`},
+                    createElement('div',
+                        {class: 'call-share-self', style: {width: cssPercent(entry.selfMs / duration)}}))))));
     hot.classList.add('call-table');
-    $('hot-methods').replaceChildren(hot);
+    byId('hot-methods').replaceChildren(hot);
 }
 
 function isExpanded(node, depth, path, context) {
     if (node.children.length === 0) {
         return false;
     }
-    if (state.callToggles.has(path)) {
-        return state.callToggles.get(path);
+    if (state.callTreeExpanded.has(path)) {
+        return state.callTreeExpanded.get(path);
     }
     return depth === 0 || node.totalMs / context.duration >= CALL_EXPAND_SHARE || hasQueries(node);
 }
@@ -1485,27 +1519,27 @@ function hasQueries(node) {
     return node.queryIndexes.length > 0 || node.children.some(hasQueries);
 }
 
-function fact(term, value) {
-    return el('div', {}, el('dt', {}, term), el('dd', {}, value));
+function createFact(term, value) {
+    return createElement('div', {}, createElement('dt', {}, term), createElement('dd', {}, value));
 }
 
-function findingCards(findings, emptyText) {
+function createFindingCards(findings, emptyText) {
     if (findings.length === 0) {
-        return [el('div', {class: 'finding clean'}, emptyText)];
+        return [createElement('div', {class: 'finding clean'}, emptyText)];
     }
-    return findings.filter(finding => FINDING_TYPES[finding.type]).map(findingCard);
+    return findings.filter(finding => FINDING_TYPES[finding.type]).map(createFindingCard);
 }
 
-function findingCard(finding) {
+function createFindingCard(finding) {
     const type = FINDING_TYPES[finding.type];
-    return el('div', {class: `finding ${type.css}`},
-        el('div', {class: 'finding-title'}, type.title(finding)),
-        finding.sql ? el('code', {class: 'sql-block'}, highlightSql(finding.sql)) : null,
-        el('div', {class: 'finding-meta'}, type.meta(finding)),
-        el('div', {class: 'finding-hint'}, type.hint));
+    return createElement('div', {class: `finding ${type.css}`},
+        createElement('div', {class: 'finding-title'}, type.title(finding)),
+        finding.sql ? createElement('code', {class: 'sql-block'}, highlightSql(finding.sql)) : null,
+        createElement('div', {class: 'finding-meta'}, type.meta(finding)),
+        createElement('div', {class: 'finding-hint'}, type.hint));
 }
 
-function share(part, whole) {
+function percentText(part, whole) {
     return `${whole > 0 ? Math.min(100, Math.round(part / whole * 100)) : 0}%`;
 }
 
@@ -1513,42 +1547,48 @@ function findingArea(finding) {
     return FINDING_TYPES[finding.type]?.area ?? 'sql';
 }
 
-function callSiteLine(callSite) {
+function createCallSiteLine(callSite) {
     if (!callSite) {
         return 'Location unknown';
     }
-    return ['Called from ', el('code', {title: callSite}, shortCallSite(callSite))];
+    return ['Called from ', createElement('code', {title: callSite}, shortCallSite(callSite))];
 }
 
-function timeline(report, roles) {
+function createTimeline(report, highlights) {
     const end = Math.max(report.durationMs, ...report.queries.map(query => query.offsetMs + query.durationMs), 0.001);
-    const rows = report.queries.map((query, index) => el('div', {
+    const rows = report.queries.map((query, index) => createElement('div', {
             class: 'bar-row',
-            title: `#${index + 1} · ${formatMs(query.durationMs)} at +${formatMs(query.offsetMs)}\n${oneLine(query.sql)}`,
+            title: `#${index + 1} · ${formatMs(query.durationMs)} at +${formatMs(query.offsetMs)}\n`
+                + collapseWhitespace(query.sql),
             onclick: () => highlightQuery(index),
         },
-        el('span', {class: 'bar-index'}, String(index + 1)),
-        el('div', {class: 'bar-track'},
-            el('div', {
-                class: ['bar', roles[index], query.failed ? 'failed' : ''].join(' '),
-                style: {left: percent(query.offsetMs / end), width: percent(query.durationMs / end)},
+        createElement('span', {class: 'bar-index'}, String(index + 1)),
+        createElement('div', {class: 'bar-track'},
+            createElement('div', {
+                class: ['bar', highlights[index], query.failed ? 'failed' : ''].join(' '),
+                style: {left: cssPercent(query.offsetMs / end), width: cssPercent(query.durationMs / end)},
             }))));
-    return el('div', {class: 'panel timeline'},
-        el('div', {class: 'axis'}, [0, 0.25, 0.5, 0.75, 1].map(fraction => el('span', {}, formatMs(end * fraction)))),
+    return createElement('div', {class: 'panel timeline'},
+        createElement('div', {class: 'axis'},
+            [0, 0.25, 0.5, 0.75, 1].map(fraction => createElement('span', {}, formatMs(end * fraction)))),
         rows);
 }
 
-function queryTable(report, roles) {
-    const queryRows = report.queries.map((query, index) => el('tr', {id: `query-${index}`, class: roles[index]},
-        el('td', {class: 'number'}, String(index + 1)),
-        el('td', {class: 'number'}, `+${formatMs(query.offsetMs)}`),
-        el('td', {class: 'number'}, formatMs(query.durationMs)),
-        el('td', {class: 'number'}, query.rows === null || query.rows === undefined ? '—' : formatCount(query.rows)),
-        el('td', {class: 'sql', title: oneLine(query.sql)},
-            query.failed ? el('span', {class: 'status-error'}, 'Failed ') : null, highlightSql(oneLine(query.sql))),
-        el('td', {class: 'params', title: query.parameters || ''}, query.parameters || '—'),
-        el('td', {class: 'call-site', title: query.callSite ?? ''}, query.callSite ? shortCallSite(query.callSite) : '—')));
-    const queries = table(
+function createQueryTable(report, highlights) {
+    const queryRows = report.queries.map((query, index) => createElement('tr',
+        {id: `query-${index}`, class: highlights[index]},
+        createElement('td', {class: 'number'}, String(index + 1)),
+        createElement('td', {class: 'number'}, `+${formatMs(query.offsetMs)}`),
+        createElement('td', {class: 'number'}, formatMs(query.durationMs)),
+        createElement('td', {class: 'number'},
+            query.rows === null || query.rows === undefined ? '—' : formatCount(query.rows)),
+        createElement('td', {class: 'sql', title: collapseWhitespace(query.sql)},
+            query.failed ? createElement('span', {class: 'status-error'}, 'Failed ') : null,
+            highlightSql(collapseWhitespace(query.sql))),
+        createElement('td', {class: 'params', title: query.parameters || ''}, query.parameters || '—'),
+        createElement('td', {class: 'call-site', title: query.callSite ?? ''},
+            query.callSite ? shortCallSite(query.callSite) : '—')));
+    const queries = createTable(
         [
             {title: '#', width: '52px', number: true},
             {title: 'Start', width: '90px', number: true},
@@ -1560,22 +1600,22 @@ function queryTable(report, roles) {
         ],
         queryRows);
     queries.classList.add('query-table');
-    return el('div', {class: 'panel'}, queries);
+    return createElement('div', {class: 'panel'}, queries);
 }
 
-function queryRoles(report) {
-    const roles = report.queries.map(() => '');
-    for (const type of ROLE_PRIORITY) {
+function queryHighlightClasses(report) {
+    const highlights = report.queries.map(() => '');
+    for (const type of HIGHLIGHT_PRIORITY) {
         for (const finding of report.findings.filter(candidate => candidate.type === type)) {
-            (finding.queryIndexes ?? [finding.queryIndex]).forEach(index => roles[index] ||= FINDING_TYPES[type].css);
+            (finding.queryIndexes ?? [finding.queryIndex]).forEach(index => highlights[index] ||= FINDING_TYPES[type].css);
         }
     }
-    return roles;
+    return highlights;
 }
 
 function highlightQuery(index) {
     document.querySelectorAll('tr.highlight').forEach(other => other.classList.remove('highlight'));
-    const row = $(`query-${index}`);
+    const row = byId(`query-${index}`);
     if (row) {
         row.classList.add('highlight');
         row.scrollIntoView({block: 'center', behavior: 'smooth'});
@@ -1586,29 +1626,29 @@ function highlightSql(sql) {
     const tokens = sql.match(/'(?:[^']|'')*'?|"[^"]*"?|`[^`]*`?|\d+(?:\.\d+)?|\?|[A-Za-z_][\w$]*|\s+|./g) ?? [];
     return tokens.map((token, index) => {
         if (token.startsWith("'")) {
-            return el('span', {class: 'sql-string'}, token);
+            return createElement('span', {class: 'sql-string'}, token);
         }
         if (/^\d/.test(token)) {
-            return el('span', {class: 'sql-number'}, token);
+            return createElement('span', {class: 'sql-number'}, token);
         }
         if (token === '?') {
-            return el('span', {class: 'sql-param'}, token);
+            return createElement('span', {class: 'sql-param'}, token);
         }
         if (/^[A-Za-z_]/.test(token)) {
             if (SQL_KEYWORDS.has(token.toLowerCase())) {
-                return el('span', {class: 'sql-keyword'}, token);
+                return createElement('span', {class: 'sql-keyword'}, token);
             }
             if (tokens[index + 1] === '(') {
-                return el('span', {class: 'sql-function'}, token);
+                return createElement('span', {class: 'sql-function'}, token);
             }
         }
         return token;
     });
 }
 
-function findingLabel(finding) {
+function createFindingLabel(finding) {
     const type = FINDING_TYPES[finding.type];
-    return el('span', {class: `label ${type ? type.css : ''}`}, findingText(finding));
+    return createElement('span', {class: `label ${type ? type.css : ''}`}, findingText(finding));
 }
 
 function findingText(finding) {
@@ -1655,7 +1695,7 @@ function formatCount(count) {
     return count.toLocaleString('en-US');
 }
 
-function oneLine(sql) {
+function collapseWhitespace(sql) {
     return sql.replace(/\s+/g, ' ').trim();
 }
 
@@ -1676,7 +1716,7 @@ function formatSeconds(ms) {
     return ms >= 60_000 ? `${Math.round(ms / 60_000 * 10) / 10} min` : `${Math.round(ms / 1000)} s`;
 }
 
-function ago(ms) {
+function timeAgo(ms) {
     const seconds = Math.max(0, Math.round(ms / 1000));
     if (seconds < 60) {
         return `${seconds} s ago`;
@@ -1685,15 +1725,15 @@ function ago(ms) {
     return minutes < 60 ? `${minutes} min ago` : `${Math.round(minutes / 60)} h ago`;
 }
 
-function percent(fraction) {
+function cssPercent(fraction) {
     return `${Math.min(100, Math.max(0, fraction * 100)).toFixed(3)}%`;
 }
 
-function wholePercent(fraction) {
+function roundedPercentText(fraction) {
     return `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%`;
 }
 
-function prepare(canvas) {
+function resetCanvas(canvas) {
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
     if (width === 0 || height === 0) {

@@ -1,4 +1,6 @@
-package me.fertiz.queryscope.agent.launch;
+package me.fertiz.queryscope.agent.cli;
+
+import me.fertiz.queryscope.agent.config.AgentProperties;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -7,7 +9,6 @@ import java.util.Set;
 
 public record LaunchCommand(List<String> agentOptions, List<String> target, List<String> applicationArguments) {
 
-    public static final String LAUNCHER_PID_PROPERTY = "queryscope.launcherPid";
 
     private static final Set<String> CLASSPATH_FLAGS = Set.of("-cp", "-classpath", "--class-path");
     private static final List<String> FOREIGN_AGENT_OPTIONS =
@@ -25,7 +26,7 @@ public record LaunchCommand(List<String> agentOptions, List<String> target, List
         List<String> agentOptions = new ArrayList<>();
         int index = 0;
         while (index < arguments.length && isAgentOption(arguments[index])) {
-            agentOptions.add(agentOption(arguments[index]));
+            agentOptions.add(toAgentOption(arguments[index]));
             index++;
         }
         if (index == arguments.length) {
@@ -66,13 +67,13 @@ public record LaunchCommand(List<String> agentOptions, List<String> target, List
         return String.join(",", agentOptions);
     }
 
-    public List<String> processCommand(String java, Path agentJar, List<String> jvmOptions, long launcherPid) {
+    public List<String> applicationCommand(String java, Path agentJar, List<String> jvmOptions, long launcherPid) {
         List<String> command = new ArrayList<>();
         command.add(java);
         jvmOptions.stream()
                 .filter(option -> FOREIGN_AGENT_OPTIONS.stream().noneMatch(option::startsWith))
                 .forEach(command::add);
-        command.add("-D" + LAUNCHER_PID_PROPERTY + "=" + launcherPid);
+        command.add("-D" + AgentProperties.LAUNCHER_PID + "=" + launcherPid);
         command.add("-javaagent:" + agentJar + (agentOptions.isEmpty() ? "" : "=" + agentOptionString()));
         command.addAll(target);
         command.addAll(applicationArguments);
@@ -83,7 +84,7 @@ public record LaunchCommand(List<String> agentOptions, List<String> target, List
         return argument.startsWith("--") && !CLASSPATH_FLAGS.contains(argument);
     }
 
-    private static String agentOption(String argument) {
+    private static String toAgentOption(String argument) {
         String option = argument.substring(2);
         return option.contains("=") ? option : option + "=true";
     }

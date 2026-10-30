@@ -4,13 +4,13 @@ import java.time.Duration;
 
 public final class Sampling {
 
-    static final String OWN_THREADS = "queryscope-";
+    static final String THREAD_NAME_PREFIX = "queryscope-";
 
     private static final System.Logger LOGGER = System.getLogger("QueryScope");
     private static final Duration SHORTEST_DUMP_INTERVAL = Duration.ofMillis(20);
     private static final long STOP_TIMEOUT_MILLIS = 2000;
 
-    private volatile Runnable stop = () -> {
+    private volatile Runnable stopSampler = () -> {
     };
 
     private Sampling() {
@@ -18,14 +18,15 @@ public final class Sampling {
 
     public static Sampling start(SampleStore store, Duration interval) {
         Sampling sampling = new Sampling();
-        Thread starter = new Thread(() -> sampling.begin(store, interval), OWN_THREADS + "sampler-start");
+        Thread starter = new Thread(() -> sampling.startJfrOrThreadDumps(store, interval),
+                THREAD_NAME_PREFIX + "sampler-start");
         starter.setDaemon(true);
         starter.start();
         return sampling;
     }
 
     public void stop() {
-        Thread stopper = new Thread(stop, OWN_THREADS + "sampler-stop");
+        Thread stopper = new Thread(stopSampler, THREAD_NAME_PREFIX + "sampler-stop");
         stopper.setDaemon(true);
         stopper.start();
         try {
@@ -35,15 +36,15 @@ public final class Sampling {
         }
     }
 
-    static String methodName(String className, String method) {
-        return typeName(className) + "." + method;
+    static String qualifiedMethod(String className, String method) {
+        return withoutHiddenClassSuffix(className) + "." + method;
     }
 
     static boolean isOwnThread(String threadName) {
-        return threadName != null && threadName.startsWith(OWN_THREADS);
+        return threadName != null && threadName.startsWith(THREAD_NAME_PREFIX);
     }
 
-    static String typeName(String name) {
+    static String withoutHiddenClassSuffix(String name) {
         int hidden = name.indexOf("/0x");
         if (hidden < 0) {
             hidden = name.indexOf(".0x");
@@ -51,10 +52,10 @@ public final class Sampling {
         return hidden < 0 ? name : name.substring(0, hidden);
     }
 
-    private synchronized void begin(SampleStore store, Duration interval) {
+    private synchronized void startJfrOrThreadDumps(SampleStore store, Duration interval) {
         try {
-            stop = JfrSampler.start(store, interval, () -> startThreadDumps(store, interval));
-            store.started(JfrSampler.SOURCE, interval);
+            stopSampler = JfrSampler.start(store, interval, () -> startThreadDumps(store, interval));
+            store.markStarted(JfrSampler.SOURCE, interval);
         } catch (LinkageError | RuntimeException e) {
             LOGGER.log(System.Logger.Level.INFO, "QueryScope falls back to thread dumps for sampling: " + e);
             startThreadDumps(store, interval);
@@ -63,7 +64,7 @@ public final class Sampling {
 
     private synchronized void startThreadDumps(SampleStore store, Duration interval) {
         Duration dumpInterval = interval.compareTo(SHORTEST_DUMP_INTERVAL) < 0 ? SHORTEST_DUMP_INTERVAL : interval;
-        stop = ThreadDumpSampler.start(store, dumpInterval);
-        store.started(ThreadDumpSampler.SOURCE, dumpInterval);
+        stopSampler = ThreadDumpSampler.start(store, dumpInterval);
+        store.markStarted(ThreadDumpSampler.SOURCE, dumpInterval);
     }
 }

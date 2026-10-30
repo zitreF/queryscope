@@ -1,6 +1,6 @@
 package me.fertiz.queryscope.agent.console;
 
-import me.fertiz.queryscope.agent.calltree.CallSites;
+import me.fertiz.queryscope.agent.appcode.CallSites;
 import me.fertiz.queryscope.agent.findings.DuplicateQuery;
 import me.fertiz.queryscope.agent.findings.Finding;
 import me.fertiz.queryscope.agent.findings.LargeResult;
@@ -22,7 +22,7 @@ final class FindingText {
     static String describe(Finding finding) {
         if (finding instanceof DuplicateQuery duplicate) {
             return String.format(Locale.ROOT, "Duplicate query: %d x %s with %s%s", duplicate.executions(),
-                    shorten(duplicate.normalizedSql()), duplicate.parameters(), location(duplicate.callSite()));
+                    shorten(duplicate.normalizedSql()), duplicate.parameters(), atCallSite(duplicate.callSite()));
         }
         return describeWithoutParameters(finding);
     }
@@ -32,39 +32,40 @@ final class FindingText {
             case N_PLUS_ONE -> {
                 NPlusOne nPlusOne = (NPlusOne) finding;
                 yield String.format(Locale.ROOT, "N+1: %d x %s%s", nPlusOne.executions(),
-                        shorten(nPlusOne.normalizedSql()), location(nPlusOne.callSite()));
+                        shorten(nPlusOne.normalizedSql()), atCallSite(nPlusOne.callSite()));
             }
             case REPEATED_WRITE -> {
                 RepeatedWrite write = (RepeatedWrite) finding;
                 yield String.format(Locale.ROOT, "Unbatched writes: %d x %s%s", write.executions(),
-                        shorten(write.normalizedSql()), location(write.callSite()));
+                        shorten(write.normalizedSql()), atCallSite(write.callSite()));
             }
             case DUPLICATE_QUERY -> {
                 DuplicateQuery duplicate = (DuplicateQuery) finding;
                 yield String.format(Locale.ROOT, "Duplicate query: %d x %s%s", duplicate.executions(),
-                        shorten(duplicate.normalizedSql()), location(duplicate.callSite()));
+                        shorten(duplicate.normalizedSql()), atCallSite(duplicate.callSite()));
             }
             case SLOW_QUERY -> {
                 SlowQuery slow = (SlowQuery) finding;
-                yield String.format(Locale.ROOT, "Slow query: %.1f ms %s%s", millis(slow.query().durationNanos()),
-                        shorten(slow.normalizedSql()), location(slow.query().callSite()));
+                yield String.format(Locale.ROOT, "Slow query: %.1f ms %s%s", toMillis(slow.query().durationNanos()),
+                        shorten(slow.normalizedSql()), atCallSite(slow.query().callSite()));
             }
             case LARGE_RESULT -> {
                 LargeResult large = (LargeResult) finding;
                 yield String.format(Locale.ROOT, "Large result: %d rows from %s%s", large.query().rows(),
-                        shorten(large.normalizedSql()), location(large.query().callSite()));
+                        shorten(large.normalizedSql()), atCallSite(large.query().callSite()));
             }
             case TOO_MANY_QUERIES -> {
                 TooManyQueries tooMany = (TooManyQueries) finding;
                 yield String.format(Locale.ROOT, "Too many queries: %d (limit %d), %.0f%% of the time in the database",
-                        tooMany.queries(), tooMany.limit(), share(tooMany.databaseNanos(), tooMany.durationNanos()));
+                        tooMany.queries(), tooMany.limit(),
+                        percentOf(tooMany.databaseNanos(), tooMany.durationNanos()));
             }
             case SLOW_METHOD -> {
                 SlowMethod slow = (SlowMethod) finding;
                 yield String.format(Locale.ROOT, "Slow method: %s spent %.1f ms in its own code outside SQL over %d %s,"
-                                + " %.0f%% of the time", CallSites.shortName(slow.method()), millis(slow.ownNanos()),
-                        slow.calls(), slow.calls() == 1 ? "call" : "calls",
-                        share(slow.ownNanos(), slow.durationNanos()));
+                                + " %.0f%% of the time", CallSites.classAndMethod(slow.method()),
+                        toMillis(slow.ownNanos()), slow.calls(), slow.calls() == 1 ? "call" : "calls",
+                        percentOf(slow.ownNanos(), slow.durationNanos()));
             }
         };
     }
@@ -109,11 +110,11 @@ final class FindingText {
         return finding.kind() + "|" + detail;
     }
 
-    static double millis(long nanos) {
+    static double toMillis(long nanos) {
         return nanos / 1_000_000.0;
     }
 
-    private static double share(long part, long whole) {
+    private static double percentOf(long part, long whole) {
         return whole == 0 ? 0 : Math.min(100, part * 100.0 / whole);
     }
 
@@ -121,7 +122,7 @@ final class FindingText {
         return sql.length() <= MAX_SQL_LENGTH ? sql : sql.substring(0, MAX_SQL_LENGTH) + "...";
     }
 
-    private static String location(String callSite) {
+    private static String atCallSite(String callSite) {
         return callSite == null ? "" : " at " + callSite;
     }
 }
