@@ -39,6 +39,7 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import static net.bytebuddy.matcher.ElementMatchers.hasSuperType;
 import static net.bytebuddy.matcher.ElementMatchers.is;
@@ -107,6 +108,7 @@ public final class AgentInstaller {
                 .of(folder.toFile(), ClassInjector.UsingInstrumentation.Target.BOOTSTRAP, instrumentation)
                 .injectRaw(Set.of(HTTP_SERVER_BRIDGE), agentClasses)
                 .get(HTTP_SERVER_BRIDGE);
+        deleteOnExit(folder);
         HttpServerBridge.connect(JdkHttpServerRequests::requestStarted, JdkHttpServerRequests::requestFinished);
         new AgentBuilder.Default()
                 .disableClassFormatChanges()
@@ -119,6 +121,13 @@ public final class AgentInstaller {
                         .include(AgentInstaller.class.getClassLoader())
                         .advice(named("doFilter").and(takesArguments(1)), JdkHttpServerAdvice.class.getName()))
                 .installOn(instrumentation);
+    }
+
+    private static void deleteOnExit(Path folder) throws IOException {
+        folder.toFile().deleteOnExit();
+        try (Stream<Path> files = Files.list(folder)) {
+            files.forEach(file -> file.toFile().deleteOnExit());
+        }
     }
 
     private static AgentBuilder retransformingBuilder() {

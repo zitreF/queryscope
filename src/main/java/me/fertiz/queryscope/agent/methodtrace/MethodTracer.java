@@ -49,7 +49,7 @@ public final class MethodTracer {
         }
         for (Class<?> type : loaded) {
             if (!declaresConcreteMethod(type, methodName)) {
-                throw new IllegalArgumentException(className + " has no method " + methodName + " with a body");
+                throw new IllegalArgumentException(missingMethodMessage(type, methodName));
             }
         }
         if (removers.size() >= MAX_TRACED_METHODS) {
@@ -84,6 +84,19 @@ public final class MethodTracer {
 
     private List<Class<?>> loadedClassesNamed(String className) {
         return Arrays.stream(loadedClasses.get()).filter(type -> type.getName().equals(className)).toList();
+    }
+
+    private static String missingMethodMessage(Class<?> type, String methodName) {
+        for (Class<?> parent = type.getSuperclass(); parent != null && !isPartOfTheJdk(parent);
+             parent = parent.getSuperclass()) {
+            if (declaresConcreteMethod(parent, methodName)) {
+                return type.getName() + " inherits " + methodName + " from " + parent.getName() + ", trace "
+                        + parent.getName() + "#" + methodName + " instead";
+            }
+        }
+        return type.getName() + " has no method " + methodName + " with a body"
+                + (type.isInterface() || Modifier.isAbstract(type.getModifiers())
+                ? ", trace a class that implements it" : "");
     }
 
     private static boolean isPartOfTheJdk(Class<?> type) {

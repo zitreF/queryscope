@@ -224,6 +224,7 @@ renderProfileControls();
 selectView(viewFromHash());
 renderAll();
 connectToEventStream();
+loadTraces();
 setInterval(onEverySecond, 1000);
 requestAnimationFrame(animateLiveStream);
 
@@ -371,7 +372,8 @@ async function copyReportForAi() {
         showSnackbar('Copied the report. Paste it into your AI assistant, or let it read /mcp directly.', SNACK_MS);
     } else {
         window.open('api/report.md', '_blank', 'noopener');
-        showSnackbar('The browser would not let the panel copy, so the report opened in a new tab.', SNACK_MS);
+        showSnackbar('The browser blocked copying, so the report opens at /api/report.md to copy from there.',
+            SNACK_MS);
     }
 }
 

@@ -1,5 +1,6 @@
 package me.fertiz.queryscope.agent.methodtrace;
 
+import me.fertiz.queryscope.profiled.DailyReportJob;
 import me.fertiz.queryscope.profiled.ReportJob;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -18,7 +19,8 @@ class MethodTracerTest {
 
     private final List<String> installed = new ArrayList<>();
     private final List<String> removed = new ArrayList<>();
-    private final MethodTracer tracer = new MethodTracer(() -> new Class<?>[]{ReportJob.class, String.class},
+    private final MethodTracer tracer = new MethodTracer(
+            () -> new Class<?>[]{ReportJob.class, DailyReportJob.class, String.class},
             (className, methodName) -> {
                 installed.add(className + "#" + methodName);
                 return () -> removed.add(className + "#" + methodName);
@@ -69,6 +71,19 @@ class MethodTracerTest {
         assertThrows(IllegalArgumentException.class, () -> tracer.start(WORKER + "#missing"));
         assertThrows(IllegalArgumentException.class, () -> tracer.start(WORKER + "#plan"));
         assertEquals(List.of(), installed);
+    }
+
+    @Test
+    void pointsAtTheClassThatDeclaresAnInheritedMethod() {
+        IllegalArgumentException inherited = assertThrows(IllegalArgumentException.class,
+                () -> tracer.start(DailyReportJob.class.getName() + "#work"));
+        IllegalArgumentException abstractMethod = assertThrows(IllegalArgumentException.class,
+                () -> tracer.start(WORKER + "#plan"));
+
+        assertEquals(DailyReportJob.class.getName() + " inherits work from " + WORKER + ", trace " + WORKER
+                + "#work instead", inherited.getMessage());
+        assertEquals(WORKER + " has no method plan with a body, trace a class that implements it",
+                abstractMethod.getMessage());
     }
 
     @Test
