@@ -245,6 +245,15 @@ serves the static panel and a JSON API: the stored reports, their call trees, pr
 stream with one event per finished report. Every SSE client gets its own bounded queue, so a slow browser never holds
 up an application thread.
 
+**For AI assistants.** `AiReport` turns the stored reports, a profile of the last five minutes and the traced methods
+into Markdown, grouping findings the way the session summary does. `/api/report.md` serves it and the panel's
+**Copy for AI** copies it. `McpEndpoint` is a Model Context Protocol server on the Streamable HTTP transport in its
+plainest form: each POST carries one JSON-RPC request and gets one JSON answer, notifications get `202`, and `GET`
+gets `405` because the server never pushes messages. It answers `initialize`, `ping`, `tools/list` and `tools/call`
+for six tools that wrap the report, the request store and the method tracer. A tool that fails answers with
+`isError` and a sentence the assistant can act on. Requests are read with `JsonReader`, a small parser written for
+this, because QueryScope brings no JSON library.
+
 **Security.** The panel and the hub listen on loopback only and reject requests whose `Host` header is not
 `localhost`, `127.0.0.1` or `[::1]`, which stops DNS rebinding. The hub's attach endpoint, the only one that changes
 anything outside QueryScope, also requires a JSON content type and a same-origin `Origin` header, so a web page on
@@ -292,8 +301,8 @@ visible right after attaching to a large application.
 
 - **Unit tests** for the SQL normalizer, the analyzer, the options, the launcher and hub command lines, parameter
   formatting, the session summary, the call stack, package detection, the sample store, profiles, the JSON writer, the
-  report store, the port fallback, a startup that fails, and the panel and hub servers, including SSE, the `Host`
-  check, the frame headers and the attach protection.
+  report store, the port fallback, a startup that fails, the AI report, the JSON reader, method tracing, and the panel,
+  MCP and hub servers, including SSE, the `Host` check, the frame headers and the attach protection.
 - **`SamplingTest`** runs the Flight Recorder sampler and the thread dump sampler against a busy thread, and
   `JfrSamplerTest` checks the switch to thread dumps when the stream fails to start.
 - **`AgentInstrumentationTest`** installs the agent into the test JVM with ByteBuddyAgent and runs real queries
@@ -302,7 +311,7 @@ visible right after attaching to a large application.
   a task's call tree fits in its duration, that a request past 1000 queries counts the rest, and that tracing a
   method at runtime records its calls and leaves its call tree intact, also after the trace is stopped.
 - **`QueryScopeEndToEndTest`** starts the demo shop with `-javaagent:queryscope.jar` in a separate JVM and checks every
-  finding, the call tree and the Flight Recorder samples through the panel's API. The demo runs on the test classpath
+  finding, the call tree, the Flight Recorder samples, method tracing and the MCP report through the panel's API. The demo runs on the test classpath
   without the agent's own classes, so only the shaded jar is attached.
 - **`LauncherEndToEndTest`** starts the demo through `java -jar queryscope.jar` and checks that killing the launcher
   takes the application and its summary down with it.
@@ -330,10 +339,12 @@ me.fertiz.queryscope.agent             QueryScopeAgent (premain, agentmain), Age
 │                                      TracedMethod, LatencyHistogram
 ├── findings                           QueryAnalyzer, SqlNormalizer, Thresholds, FindingKind and the finding records
 ├── profiler                           Sampling, JfrSampler, ThreadDumpSampler, SampleStore, Profile
-├── console                            ConsoleReporter, SessionSummary, FindingText
-├── panel                              PanelServer, ReportStore, ReportJson, ProfileJson, ProfileQuery
+├── console                            ConsoleReporter, SessionSummary, FindingText, AiReport
+├── panel                              PanelServer, ReportStore, ReportJson, ProfileJson, ProfileQuery,
+│                                      MethodTraceJson, McpEndpoint
 ├── hub                                HubServer, LocalProcesses, JavaProcess
-├── http                               LocalServer, HttpSupport, JsonWriter, Browser, shared by panel and hub
+├── http                               LocalServer, HttpSupport, JsonWriter, JsonReader, Browser, shared by panel
+│                                      and hub
 └── cli                                QueryScopeLauncher (the jar's Main-Class), LaunchCommand, HubCommand
 ```
 

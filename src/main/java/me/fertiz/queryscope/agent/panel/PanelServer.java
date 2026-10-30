@@ -2,6 +2,7 @@ package me.fertiz.queryscope.agent.panel;
 
 import com.sun.net.httpserver.HttpExchange;
 import me.fertiz.queryscope.agent.appcode.AppPackages;
+import me.fertiz.queryscope.agent.console.AiReport;
 import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.http.HttpSupport;
 import me.fertiz.queryscope.agent.http.LocalServer;
@@ -12,6 +13,7 @@ import me.fertiz.queryscope.agent.profiler.SampleStore;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
@@ -42,6 +44,8 @@ public final class PanelServer {
     private static final Pattern TRACE_REQUEST =
             Pattern.compile("\\{\\s*\"method\"\\s*:\\s*\"([^\"\\\\]{1,500})\"\\s*}");
     private static final String TRACES_PATH = "/api/traces";
+    private static final String MARKDOWN = "text/markdown; charset=utf-8";
+    private static final long REPORT_WINDOW_MILLIS = 5 * 60 * 1000;
     private static final int MAX_BODY = 1024;
 
     private final ReportStore store;
@@ -63,12 +67,15 @@ public final class PanelServer {
                                     AppPackages application, SampleStore samples, MethodTracer tracer)
             throws IOException {
         PanelServer panel = new PanelServer(store, callTreePackages, application, samples, tracer);
+        McpEndpoint mcp = new McpEndpoint(store, callTreePackages, tracer, panel::aiReport);
         return LocalServer.start(port, portGiven, "queryscope-panel", Map.of(
                 "/", HttpSupport.staticFiles(ASSETS),
                 "/api/requests", panel::serveRequests,
                 "/api/profile", panel::serveProfile,
                 TRACES_PATH, panel::serveTraces,
-                "/api/events", panel::streamEvents));
+                "/api/report.md", panel::serveAiReport,
+                "/api/events", panel::streamEvents,
+                "/mcp", mcp::serve));
     }
 
     private void serveRequests(HttpExchange exchange) throws IOException {
@@ -121,6 +128,20 @@ public final class PanelServer {
         }
         Profile profile = Profile.build(samples, application, filter.get());
         respond(exchange, 200, JSON, ProfileJson.profileToJson(profile, samples, filter.get(), application.names()));
+    }
+
+    private void serveAiReport(HttpExchange exchange) throws IOException {
+        if (requireMethod(exchange, "GET")) {
+            respond(exchange, 200, MARKDOWN, aiReport());
+        }
+    }
+
+    private String aiReport() {
+        long now = samples.now();
+        Profile.Filter recent = new Profile.Filter(now - REPORT_WINDOW_MILLIS, now, Profile.Filter.ALL_THREADS, false,
+                false, List.of());
+        return AiReport.markdown(store.newestFirst(), application.names(), Profile.build(samples, application, recent),
+                samples.source(), tracer.snapshots());
     }
 
     private void serveTraces(HttpExchange exchange) throws IOException {

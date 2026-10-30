@@ -248,6 +248,25 @@ class QueryScopeEndToEndTest {
     }
 
     @Test
+    void answersAnAiAssistantOverMcp() throws Exception {
+        assertEquals(200, get(appPort, "/api/customers/naive").statusCode());
+        reportFor(panelPort, "/api/customers/naive");
+
+        HttpResponse<String> response = CLIENT.send(HttpRequest.newBuilder(panel("/mcp"))
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\","
+                        + "\"params\":{\"name\":\"get_report\",\"arguments\":{}}}"))
+                .build(), HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode(), response.body());
+        String report = JSON.readTree(response.body()).path("result").path("content").get(0).path("text").asString();
+        assertTrue(report.contains("N+1: "), report);
+        assertTrue(report.contains(CustomerSummary.class.getName() + ".of("), report);
+        assertTrue(report.contains("GET /api/customers/naive"), report);
+    }
+
+    @Test
     void servesThePanelPage() throws Exception {
         HttpResponse<String> page = get(panelPort, "/");
 

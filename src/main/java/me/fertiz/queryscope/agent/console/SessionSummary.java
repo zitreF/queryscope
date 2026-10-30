@@ -11,11 +11,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.Consumer;
 
 public final class SessionSummary implements Consumer<UnitReport> {
@@ -157,7 +155,7 @@ public final class SessionSummary implements Consumer<UnitReport> {
         return name.length() <= NAME_WIDTH ? name : name.substring(0, NAME_WIDTH - 3) + "...";
     }
 
-    private static String formatDuration(long nanos) {
+    static String formatDuration(long nanos) {
         double millis = nanos / 1_000_000.0;
         return millis >= 1000
                 ? String.format(Locale.ROOT, "%.2f s", millis / 1000)
@@ -169,28 +167,6 @@ public final class SessionSummary implements Consumer<UnitReport> {
         return seconds >= 60
                 ? String.format(Locale.ROOT, "%d min %d s", seconds / 60, seconds % 60)
                 : String.format(Locale.ROOT, "%d s", seconds);
-    }
-
-    private static final class EndpointStats {
-
-        private final String name;
-        private final Set<String> badges = new LinkedHashSet<>();
-        private long calls;
-        private long queries;
-        private long durationNanos;
-        private long databaseNanos;
-
-        private EndpointStats(String name) {
-            this.name = name;
-        }
-
-        private void add(UnitReport report) {
-            calls++;
-            queries += report.trace().queryCount();
-            durationNanos += report.trace().durationNanos();
-            databaseNanos += report.trace().databaseNanos();
-            report.findings().forEach(finding -> badges.add(FindingText.badge(finding)));
-        }
     }
 
     private static final class FindingStats {

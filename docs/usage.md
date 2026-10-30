@@ -232,6 +232,35 @@ its ten slowest calls and its fifty latest ones, each with the time it took, the
 ran in, one click away. A class that is not loaded yet is traced as soon as it loads. Classes of the JDK and of
 QueryScope cannot be traced, and at most 20 methods are traced at a time.
 
+## With an AI assistant
+
+QueryScope can hand what it saw to an AI assistant, so it can find and fix the slow parts with you.
+
+**Copy for AI** in the panel's header copies a Markdown report: the findings with their SQL, call site and the
+endpoints they were seen in, the endpoints and tasks by time in the database, the hot methods of the last five
+minutes and the traced methods. Paste it into any assistant. The same report is at `GET /api/report.md`, so an
+assistant that runs commands can read it with `curl -s localhost:7070/api/report.md`.
+
+**MCP.** The panel is also a [Model Context Protocol](https://modelcontextprotocol.io) server at `/mcp`, over the
+Streamable HTTP transport, so an assistant can ask QueryScope itself while the app runs. In Claude Code:
+
+```bash
+claude mcp add --transport http queryscope http://localhost:7070/mcp
+```
+
+Any other client that speaks MCP over HTTP is set up with the same URL. The tools:
+
+| Tool            | Does                                                                                   |
+|-----------------|----------------------------------------------------------------------------------------|
+| `get_report`    | the Markdown report above                                                              |
+| `list_requests` | the newest requests and tasks with their id, time, queries and findings                |
+| `get_request`   | one request or task as JSON: every query with SQL, parameters and call site, its findings and call tree |
+| `trace_method`  | starts tracing a method, named as `com.acme.OrderService#findAll`                      |
+| `list_traces`   | the traced methods with their percentiles, slowest and latest calls                    |
+| `stop_trace`    | stops tracing a method                                                                 |
+
+Like the rest of the panel, `/mcp` answers on localhost only and takes no requests from other web pages.
+
 ## Findings
 
 | Finding           | Area | Reported when                                                                 | Option              |
@@ -362,6 +391,8 @@ The panel is backed by a small JSON API on the same port:
 | `GET /api/traces`              | the traced methods with their counts, percentiles, slowest and latest calls           |
 | `POST /api/traces`             | starts tracing the method in a body like `{"method": "com.acme.OrderService#findAll"}` |
 | `DELETE /api/traces/{method}`  | stops tracing it, named as `com.acme.OrderService.findAll`                            |
+| `GET /api/report.md`           | the report for AI assistants in Markdown                                              |
+| `POST /mcp`                    | the MCP server, see [With an AI assistant](#with-an-ai-assistant)                     |
 
 A request or entry task keeps its first 1000 queries in `queries`; any beyond that are counted in `omittedQueries` and
 their time in `omittedMs`, and they still count for *Too many queries* and the time in the database.

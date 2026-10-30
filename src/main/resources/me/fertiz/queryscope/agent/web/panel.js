@@ -174,6 +174,7 @@ for (const button of document.querySelectorAll('.subtab')) {
 window.addEventListener('hashchange', () => selectView(viewFromHash()));
 byId('pause').addEventListener('click', togglePause);
 byId('clear').addEventListener('click', clearAll);
+byId('copy-for-ai').addEventListener('click', copyReportForAi);
 byId('only-findings').addEventListener('change', event => {
     state.onlyFindings = event.target.checked;
     renderAll();
@@ -351,6 +352,41 @@ function updatePauseButton() {
     byId('pause').textContent = state.paused
         ? `Resume${state.reportsWhilePaused.length > 0 ? ` (${state.reportsWhilePaused.length} new)` : ''}`
         : 'Pause';
+}
+
+async function copyReportForAi() {
+    byId('snackbar-action').hidden = true;
+    let report;
+    try {
+        const response = await fetch('api/report.md');
+        if (!response.ok) {
+            throw new Error(`the panel answered ${response.status}`);
+        }
+        report = await response.text();
+    } catch (error) {
+        showSnackbar(`Could not load the report: ${error.message}`, SNACK_MS);
+        return;
+    }
+    if (await copyToClipboard(report)) {
+        showSnackbar('Copied the report. Paste it into your AI assistant, or let it read /mcp directly.', SNACK_MS);
+    } else {
+        window.open('api/report.md', '_blank', 'noopener');
+        showSnackbar('The browser would not let the panel copy, so the report opened in a new tab.', SNACK_MS);
+    }
+}
+
+async function copyToClipboard(text) {
+    try {
+        await navigator.clipboard.writeText(text);
+        return true;
+    } catch (error) {
+        const field = createElement('textarea', {style: {position: 'fixed', opacity: '0'}}, text);
+        document.body.append(field);
+        field.select();
+        const copied = document.execCommand('copy');
+        field.remove();
+        return copied;
+    }
 }
 
 async function clearAll() {
