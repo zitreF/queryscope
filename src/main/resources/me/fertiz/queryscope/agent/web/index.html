@@ -40,6 +40,9 @@
             <button type="button" class="subtab" data-view="java/calls" aria-controls="view-calls">
                 Call trees <span class="tab-count" id="call-count">0</span>
             </button>
+            <button type="button" class="subtab" data-view="java/traces" aria-controls="view-traces">
+                Traced methods <span class="tab-count" id="trace-count">0</span>
+            </button>
         </div>
     </nav>
 </header>
@@ -164,6 +167,26 @@
             </aside>
             <article class="details" id="call-details"></article>
         </div>
+    </section>
+
+    <section class="view" id="view-traces" role="tabpanel" hidden>
+        <section class="panel">
+            <div class="panel-header">
+                <div>
+                    <h2>Traced methods</h2>
+                    <p class="panel-hint">Every call of the methods you trace, with its time and the request or task it
+                        ran in. Pick one with Trace in the profiler's hot methods, or name it here.</p>
+                </div>
+            </div>
+            <form class="trace-form" id="trace-form">
+                <input type="text" class="search" id="trace-method" placeholder="com.acme.OrderService#findAll"
+                       aria-label="Class and method to trace" spellcheck="false" autocomplete="off">
+                <button type="submit" class="filled-button">Trace</button>
+                <span class="trace-error" id="trace-error" role="alert"></span>
+            </form>
+            <div id="trace-list"></div>
+        </section>
+        <section class="panel" id="trace-details" hidden></section>
     </section>
 </main>
 

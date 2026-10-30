@@ -5,6 +5,7 @@ import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.http.HttpSupport;
 import me.fertiz.queryscope.agent.http.LocalServer;
+import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
 import me.fertiz.queryscope.agent.profiler.Profile;
 import me.fertiz.queryscope.agent.profiler.SampleStore;
 
@@ -21,6 +22,9 @@ import java.util.regex.Pattern;
 
 import static me.fertiz.queryscope.agent.http.HttpSupport.JSON;
 import static me.fertiz.queryscope.agent.http.HttpSupport.TEXT;
+import static me.fertiz.queryscope.agent.http.HttpSupport.errorJson;
+import static me.fertiz.queryscope.agent.http.HttpSupport.readBody;
+import static me.fertiz.queryscope.agent.http.HttpSupport.requireJsonFromSameOrigin;
 import static me.fertiz.queryscope.agent.http.HttpSupport.requireMethod;
 import static me.fertiz.queryscope.agent.http.HttpSupport.respond;
 import static me.fertiz.queryscope.agent.http.HttpSupport.sendStatus;
@@ -35,26 +39,35 @@ public final class PanelServer {
     private static final long HEARTBEAT_SECONDS = 15;
     private static final int MAX_PENDING_EVENTS = 500;
     private static final Pattern CALLS_PATH = Pattern.compile("/api/requests/(\\d{1,18})/calls");
+    private static final Pattern TRACE_REQUEST =
+            Pattern.compile("\\{\\s*\"method\"\\s*:\\s*\"([^\"\\\\]{1,500})\"\\s*}");
+    private static final String TRACES_PATH = "/api/traces";
+    private static final int MAX_BODY = 1024;
 
     private final ReportStore store;
     private final AppPackages callTreePackages;
     private final AppPackages application;
     private final SampleStore samples;
+    private final MethodTracer tracer;
 
-    private PanelServer(ReportStore store, AppPackages callTreePackages, AppPackages application, SampleStore samples) {
+    private PanelServer(ReportStore store, AppPackages callTreePackages, AppPackages application, SampleStore samples,
+                        MethodTracer tracer) {
         this.store = store;
         this.callTreePackages = callTreePackages;
         this.application = application;
         this.samples = samples;
+        this.tracer = tracer;
     }
 
     public static LocalServer start(int port, boolean portGiven, ReportStore store, AppPackages callTreePackages,
-                                    AppPackages application, SampleStore samples) throws IOException {
-        PanelServer panel = new PanelServer(store, callTreePackages, application, samples);
+                                    AppPackages application, SampleStore samples, MethodTracer tracer)
+            throws IOException {
+        PanelServer panel = new PanelServer(store, callTreePackages, application, samples, tracer);
         return LocalServer.start(port, portGiven, "queryscope-panel", Map.of(
                 "/", HttpSupport.staticFiles(ASSETS),
                 "/api/requests", panel::serveRequests,
                 "/api/profile", panel::serveProfile,
+                TRACES_PATH, panel::serveTraces,
                 "/api/events", panel::streamEvents));
     }
 
@@ -108,6 +121,54 @@ public final class PanelServer {
         }
         Profile profile = Profile.build(samples, application, filter.get());
         respond(exchange, 200, JSON, ProfileJson.profileToJson(profile, samples, filter.get(), application.names()));
+    }
+
+    private void serveTraces(HttpExchange exchange) throws IOException {
+        String path = exchange.getRequestURI().getPath();
+        if (path.startsWith(TRACES_PATH + "/")) {
+            stopTrace(exchange, path.substring(TRACES_PATH.length() + 1));
+            return;
+        }
+        if (!path.equals(TRACES_PATH)) {
+            sendStatus(exchange, 404);
+            return;
+        }
+        switch (exchange.getRequestMethod()) {
+            case "GET" -> respond(exchange, 200, JSON,
+                    MethodTraceJson.tracesToJson(tracer.snapshots(), MethodTracer.MAX_TRACED_METHODS));
+            case "POST" -> startTrace(exchange);
+            default -> sendStatus(exchange, 405);
+        }
+    }
+
+    private void startTrace(HttpExchange exchange) throws IOException {
+        if (!requireJsonFromSameOrigin(exchange)) {
+            return;
+        }
+        Matcher request = TRACE_REQUEST.matcher(readBody(exchange, MAX_BODY).trim());
+        if (!request.matches()) {
+            respond(exchange, 400, JSON,
+                    errorJson("Send the method as {\"method\": \"com.acme.OrderService#findAll\"}"));
+            return;
+        }
+        try {
+            respond(exchange, 200, JSON, MethodTraceJson.startedToJson(tracer.start(request.group(1))));
+        } catch (IllegalArgumentException e) {
+            respond(exchange, 400, JSON, errorJson(e.getMessage()));
+        } catch (IllegalStateException e) {
+            respond(exchange, 409, JSON, errorJson(e.getMessage()));
+        }
+    }
+
+    private void stopTrace(HttpExchange exchange, String method) throws IOException {
+        if (!requireMethod(exchange, "DELETE")) {
+            return;
+        }
+        if (!HttpSupport.sameOrigin(exchange)) {
+            sendStatus(exchange, 403);
+            return;
+        }
+        sendStatus(exchange, tracer.stop(method) ? 204 : 404);
     }
 
     private void streamEvents(HttpExchange exchange) throws IOException {

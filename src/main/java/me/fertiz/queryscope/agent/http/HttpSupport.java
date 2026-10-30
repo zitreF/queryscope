@@ -60,6 +60,29 @@ public final class HttpSupport {
         sendBytes(exchange, status, contentType, body.getBytes(StandardCharsets.UTF_8));
     }
 
+    public static boolean requireJsonFromSameOrigin(HttpExchange exchange) throws IOException {
+        String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
+        if (contentType == null || !contentType.startsWith("application/json")) {
+            sendStatus(exchange, 415);
+            return false;
+        }
+        if (!sameOrigin(exchange)) {
+            sendStatus(exchange, 403);
+            return false;
+        }
+        return true;
+    }
+
+    public static String readBody(HttpExchange exchange, int maxBytes) throws IOException {
+        try (InputStream in = exchange.getRequestBody()) {
+            return new String(in.readNBytes(maxBytes), StandardCharsets.UTF_8);
+        }
+    }
+
+    public static String errorJson(String message) {
+        return new JsonWriter().beginObject().name("error").value(message).endObject().toString();
+    }
+
     public static boolean sameOrigin(HttpExchange exchange) {
         String origin = exchange.getRequestHeaders().getFirst("Origin");
         String host = exchange.getRequestHeaders().getFirst("Host");

@@ -35,6 +35,7 @@ final class ActiveUnit {
     private long queryFinishedNanos = startedNanos;
     private int omittedQueries;
     private long omittedNanos;
+    private String label;
 
     private ActiveUnit(long id, UnitKind kind, String method, String path, boolean startedByQuery) {
         this.id = id;
@@ -54,6 +55,17 @@ final class ActiveUnit {
 
     static ActiveUnit startedByQuery(long id, String name) {
         return new ActiveUnit(id, UnitKind.TASK, TASK_METHOD, name, true);
+    }
+
+    long id() {
+        return id;
+    }
+
+    String label() {
+        if (label == null) {
+            label = kind == UnitKind.HTTP ? method + " " + path : "Task " + path;
+        }
+        return label;
     }
 
     boolean isStartedByQuery() {

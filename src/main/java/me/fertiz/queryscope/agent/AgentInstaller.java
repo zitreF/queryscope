@@ -4,6 +4,7 @@ import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.appcode.CallSites;
 import me.fertiz.queryscope.agent.calltree.CallTracer;
 import me.fertiz.queryscope.agent.calltree.MethodAdvice;
+import me.fertiz.queryscope.agent.methodtrace.MethodTraceAdvice;
 import me.fertiz.queryscope.agent.trace.ClearParametersAdvice;
 import me.fertiz.queryscope.agent.trace.ConnectionReleaseAdvice;
 import me.fertiz.queryscope.agent.trace.EntryAdvice;
@@ -15,6 +16,7 @@ import me.fertiz.queryscope.agent.trace.RowAdvice;
 import me.fertiz.queryscope.agent.trace.ServletAdvice;
 import me.fertiz.queryscope.agent.trace.Servlets;
 import net.bytebuddy.agent.builder.AgentBuilder;
+import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
 import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.dynamic.Nexus;
@@ -60,17 +62,7 @@ public final class AgentInstaller {
         if (!callTreePackages.isEmpty()) {
             CallTracer.enable();
         }
-        AgentBuilder builder = new AgentBuilder.Default()
-                .disableClassFormatChanges()
-                .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
-                .with(new ErrorLogger())
-                .ignore(nameStartsWith(CallSites.AGENT_PACKAGE_PREFIX)
-                        .or(nameStartsWith("net.bytebuddy."))
-                        .or(nameStartsWith("java."))
-                        .or(nameStartsWith("jdk."))
-                        .or(nameStartsWith("sun."))
-                        .or(nameStartsWith("com.sun."))
-                        .or(isSynthetic()));
+        AgentBuilder builder = retransformingBuilder();
         List<Hook> hooks = new ArrayList<>(servletHooks());
         hooks.addAll(jdbcHooks());
         hooks.addAll(entryHooks(entryMethods));
@@ -83,6 +75,31 @@ public final class AgentInstaller {
                     .advice(not(isAbstract()).and(hook.methods()), hook.advice().getName()));
         }
         builder.installOn(instrumentation);
+    }
+
+    public static Runnable installMethodTrace(Instrumentation instrumentation, String className, String methodName) {
+        ResettableClassFileTransformer transformer = retransformingBuilder()
+                .type(named(className))
+                .transform(new AgentBuilder.Transformer.ForAdvice()
+                        .include(AgentInstaller.class.getClassLoader())
+                        .advice(named(methodName).and(not(isAbstract())).and(not(isNative())),
+                                MethodTraceAdvice.class.getName()))
+                .installOn(instrumentation);
+        return () -> transformer.reset(instrumentation, AgentBuilder.RedefinitionStrategy.RETRANSFORMATION);
+    }
+
+    private static AgentBuilder retransformingBuilder() {
+        return new AgentBuilder.Default()
+                .disableClassFormatChanges()
+                .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                .with(new ErrorLogger())
+                .ignore(nameStartsWith(CallSites.AGENT_PACKAGE_PREFIX)
+                        .or(nameStartsWith("net.bytebuddy."))
+                        .or(nameStartsWith("java."))
+                        .or(nameStartsWith("jdk."))
+                        .or(nameStartsWith("sun."))
+                        .or(nameStartsWith("com.sun."))
+                        .or(isSynthetic()));
     }
 
     private static List<Hook> servletHooks() {

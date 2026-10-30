@@ -42,6 +42,7 @@ public final class QueryScopeLauncher {
               --sampleMs=10               how often the sampling profiler takes a stack sample
               --sampling=false            turns the sampling profiler off
               --entry=com.acme.Job#run    method whose call becomes one task, can be repeated
+              --trace=com.acme.Job#run    method whose every call is recorded, can be repeated
 
             JVM options of this java command, such as -Xmx1g or -Dspring.profiles.active=local, are
             passed on to the application, except other agents and debuggers.

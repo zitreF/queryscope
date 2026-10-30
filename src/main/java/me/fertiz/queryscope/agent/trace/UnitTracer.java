@@ -11,6 +11,8 @@ import java.util.function.Consumer;
 
 public final class UnitTracer {
 
+    public static final long NO_UNIT = 0;
+
     private static final System.Logger LOGGER = System.getLogger("QueryScope");
     private static final ThreadLocal<ActiveUnit> CURRENT = new ThreadLocal<>();
     private static final AtomicLong IDS = new AtomicLong();
@@ -31,6 +33,16 @@ public final class UnitTracer {
 
     public static int openTaskCount() {
         return OPEN_TASKS.get();
+    }
+
+    public static long currentUnitId() {
+        ActiveUnit current = CURRENT.get();
+        return current == null ? NO_UNIT : current.id();
+    }
+
+    public static String currentUnitLabel() {
+        ActiveUnit current = CURRENT.get();
+        return current == null ? null : current.label();
     }
 
     public static boolean inRequestOrEntryTask() {

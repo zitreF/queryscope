@@ -217,6 +217,20 @@ prints its table from a shutdown hook, together with the hottest methods of the 
 - **JSON.** `ProfileJson` writes nodes with at least a thousandth of the samples, so a profile stays small enough for
   the browser however long the application ran.
 
+## Tracing methods on demand
+
+`MethodTracer` checks a `Class#method` name, refuses classes of the JDK and of QueryScope, and asks
+`AgentInstaller.installMethodTrace` for a ByteBuddy transformer of its own that adds `MethodTraceAdvice` to that one
+method. The transformer retransforms the class if it is already loaded, and every other transformer is applied again
+on the way, so the JDBC hooks and the call tree stay in place. **Stop** resets the transformer, which retransforms
+the class back.
+
+The advice reads `System.nanoTime()` on entry and hands the duration to `MethodTraces`, a map from method name to its
+`TracedMethod`. That keeps the count, failures and total in `LongAdder`s, the durations in a log-linear histogram of
+eight buckets per power of two, so a percentile is off by at most an eighth, and the latest 50 and slowest 10 calls in
+fixed arrays with their thread and the id and name of the unit of work they ran in, so recording a call allocates
+nothing. While all calls of a method are among its latest 50, percentiles come from them exactly.
+
 ## The panel
 
 **Server.** `PanelServer` is the JDK's built-in `com.sun.net.httpserver`, bound to loopback on daemon threads. It
@@ -248,6 +262,7 @@ Everything QueryScope keeps has a limit:
 | Queries of a request or entry task | the first 1000 recorded, the rest only counted and timed |
 | Samples                       | 15 minutes, at most 200,000                        |
 | Session summary               | 500 endpoints, 200 distinct findings               |
+| Traced methods                | 20, each with its 50 latest and 10 slowest calls   |
 | Statements and result sets    | held weakly, gone with the application's objects   |
 
 QueryScope's threads are daemons, so they never keep the application alive: `queryscope-panel-*` for the panel,
@@ -277,7 +292,8 @@ visible right after attaching to a large application.
 - **`AgentInstrumentationTest`** installs the agent into the test JVM with ByteBuddyAgent and runs real queries
   through HikariCP and H2 inside simulated `jakarta.servlet` and `javax.servlet` requests, outside any request and
   inside an `entry=` method, and checks the call tree of a profiled fixture class with recursion and exceptions, that
-  a task's call tree fits in its duration, and that a request past 1000 queries counts the rest.
+  a task's call tree fits in its duration, that a request past 1000 queries counts the rest, and that tracing a
+  method at runtime records its calls and leaves its call tree intact, also after the trace is stopped.
 - **`QueryScopeEndToEndTest`** starts the demo shop with `-javaagent:queryscope.jar` in a separate JVM and checks every
   finding, the call tree and the Flight Recorder samples through the panel's API. The demo runs on the test classpath
   without the agent's own classes, so only the shaded jar is attached.
@@ -300,6 +316,8 @@ me.fertiz.queryscope.agent             QueryScopeAgent (premain, agentmain), Age
 │                                      BoundStatement, Servlets, the JDBC, servlet and entry advice, UnitTrace
 ├── calltree                           the call tree of your methods: CallTracer, CallTreeBuilder, MethodAdvice,
 │                                      CallTree, CallNode
+├── methodtrace                        tracing chosen methods: MethodTracer, MethodTraceAdvice, MethodTraces,
+│                                      TracedMethod, LatencyHistogram
 ├── findings                           QueryAnalyzer, SqlNormalizer, Thresholds, FindingKind and the finding records
 ├── profiler                           Sampling, JfrSampler, ThreadDumpSampler, SampleStore, Profile
 ├── console                            ConsoleReporter, SessionSummary, FindingText

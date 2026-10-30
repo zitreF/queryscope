@@ -608,6 +608,26 @@ td.ellipsis {
     border-left-color: var(--blue);
 }
 
+tbody tr.selected, tbody tr.selected:hover {
+    background: var(--blue-bg);
+}
+
+.trace-form {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 20px 16px;
+}
+
+.trace-form .search {
+    width: 420px;
+}
+
+.trace-error {
+    color: var(--red);
+    font-size: 13px;
+}
+
 .request-line {
     display: flex;
     align-items: baseline;

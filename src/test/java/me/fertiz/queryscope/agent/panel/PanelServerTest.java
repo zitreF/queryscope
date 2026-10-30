@@ -2,6 +2,7 @@ package me.fertiz.queryscope.agent.panel;
 
 import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.http.LocalServer;
+import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
 import me.fertiz.queryscope.agent.profiler.SampleStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,16 +33,19 @@ class PanelServerTest {
     private final HttpClient client = HttpClient.newHttpClient();
     private final ReportStore store = new ReportStore(10);
     private final SampleStore samples = new SampleStore(Clock.systemUTC(), 100, Duration.ofMinutes(5));
+    private final MethodTracer tracer = new MethodTracer(() -> new Class<?>[0], (className, methodName) -> () -> {
+    });
     private LocalServer panel;
 
     @BeforeEach
     void startPanel() throws IOException {
         AppPackages acme = AppPackages.of(List.of("com.acme"));
-        panel = PanelServer.start(0, true, store, acme, acme, samples);
+        panel = PanelServer.start(0, true, store, acme, acme, samples, tracer);
     }
 
     @AfterEach
     void stopPanel() {
+        tracer.snapshots().forEach(trace -> tracer.stop(trace.method()));
         panel.stop();
     }
 
@@ -120,6 +124,33 @@ class PanelServerTest {
     }
 
     @Test
+    void startsListsAndStopsMethodTraces() throws Exception {
+        HttpResponse<String> started = postTrace("{\"method\": \"com.acme.OrderService#findAll\"}", null);
+
+        assertEquals(200, started.statusCode());
+        assertEquals("{\"method\":\"com.acme.OrderService.findAll\",\"loadedClasses\":0}", started.body());
+        String traces = get("/api/traces").body();
+        assertTrue(traces.startsWith("{\"limit\":20,\"traces\":[{\"method\":\"com.acme.OrderService.findAll\","), traces);
+        assertEquals(204, delete("/api/traces/com.acme.OrderService.findAll").statusCode());
+        assertEquals(404, delete("/api/traces/com.acme.OrderService.findAll").statusCode());
+        assertEquals("{\"limit\":20,\"traces\":[]}", get("/api/traces").body());
+    }
+
+    @Test
+    void startsTracesOnlyFromJsonSentByItsOwnPage() throws Exception {
+        String body = "{\"method\": \"com.acme.OrderService#findAll\"}";
+
+        assertEquals(415, client.send(request("/api/traces").POST(HttpRequest.BodyPublishers.ofString(body))
+                .header("Content-Type", "text/plain").build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+        assertEquals(403, postTrace(body, "http://attacker.example").statusCode());
+        assertEquals(400, postTrace("{\"method\": \"findAll\"}", null).statusCode());
+        HttpResponse<String> jdk = postTrace("{\"method\": \"java.lang.String#length\"}", null);
+        assertEquals(400, jdk.statusCode());
+        assertTrue(jdk.body().contains("classes of the JDK and of QueryScope stay as they are"), jdk.body());
+        assertEquals("{\"limit\":20,\"traces\":[]}", get("/api/traces").body());
+    }
+
+    @Test
     void rejectsRequestsForOtherHostNames() throws IOException {
         try (Socket socket = new Socket("127.0.0.1", panel.port())) {
             OutputStream out = socket.getOutputStream();
@@ -130,6 +161,19 @@ class PanelServerTest {
 
             assertEquals("HTTP/1.1 403 Forbidden", in.readLine());
         }
+    }
+
+    private HttpResponse<String> postTrace(String body, String origin) throws Exception {
+        HttpRequest.Builder post = request("/api/traces").POST(HttpRequest.BodyPublishers.ofString(body))
+                .header("Content-Type", "application/json");
+        if (origin != null) {
+            post.header("Origin", origin);
+        }
+        return client.send(post.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> delete(String path) throws Exception {
+        return client.send(request(path).DELETE().build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private HttpResponse<String> get(String path) throws Exception {

@@ -15,6 +15,8 @@ import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.calltree.CallNode;
 import me.fertiz.queryscope.agent.findings.QueryAnalyzer;
 import me.fertiz.queryscope.agent.findings.TooManyQueries;
+import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
+import me.fertiz.queryscope.agent.methodtrace.TracedMethod;
 import me.fertiz.queryscope.agent.trace.QueryExecution;
 import me.fertiz.queryscope.agent.trace.UnitTrace;
 import me.fertiz.queryscope.agent.trace.UnitTracer;
@@ -27,6 +29,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.lang.instrument.Instrumentation;
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -50,10 +53,12 @@ class AgentInstrumentationTest {
     private static final long PAUSE_MILLIS = 200;
 
     private static HikariDataSource dataSource;
+    private static Instrumentation instrumentation;
 
     @BeforeAll
     static void installAgent() throws SQLException {
-        AgentInstaller.install(ByteBuddyAgent.install(), List.of(ImportJob.class.getName() + "#run"),
+        instrumentation = ByteBuddyAgent.install();
+        AgentInstaller.install(instrumentation, List.of(ImportJob.class.getName() + "#run"),
                 AppPackages.of(List.of(BookCatalog.class.getPackageName())));
         UnitTracer.publishTo(TRACES::add);
 
@@ -243,6 +248,30 @@ class AgentInstrumentationTest {
         assertTrue(trace.databaseNanos() > trace.queries().stream().mapToLong(QueryExecution::durationNanos).sum());
         assertTrue(new QueryAnalyzer(AgentConfig.DEFAULTS.thresholds()).analyze(trace).findings().stream()
                 .anyMatch(finding -> finding instanceof TooManyQueries tooMany && tooMany.queries() == 1500));
+    }
+
+    @Test
+    void tracesAMethodAtRuntimeAndKeepsItsCallTree() {
+        BookCatalog catalog = new BookCatalog(dataSource);
+        MethodTracer tracer = new MethodTracer(instrumentation::getAllLoadedClasses,
+                (className, methodName) -> AgentInstaller.installMethodTrace(instrumentation, className, methodName));
+        try {
+            assertEquals(1, tracer.start(BookCatalog.class.getName() + "#depth").loadedClasses());
+            handle(request(DispatcherType.REQUEST, "/catalog"), () -> assertEquals(3, catalog.depth(3)));
+
+            TracedMethod.Snapshot traced = tracer.snapshots().get(0);
+            assertEquals(4, traced.calls());
+            assertEquals("GET /catalog", traced.recent().get(0).unit());
+            assertEquals(4, single(singleTrace().callTree().topLevelCalls()).calls());
+        } finally {
+            tracer.stop(BookCatalog.class.getName() + ".depth");
+        }
+        TRACES.clear();
+
+        handle(request(DispatcherType.REQUEST, "/catalog"), () -> assertEquals(2, catalog.depth(2)));
+
+        assertEquals(List.of(), tracer.snapshots());
+        assertEquals(3, single(singleTrace().callTree().topLevelCalls()).calls());
     }
 
     @Test

@@ -10,6 +10,7 @@ import me.fertiz.queryscope.agent.findings.QueryAnalyzer;
 import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.http.Browser;
 import me.fertiz.queryscope.agent.http.LocalServer;
+import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
 import me.fertiz.queryscope.agent.panel.PanelServer;
 import me.fertiz.queryscope.agent.panel.ReportStore;
 import me.fertiz.queryscope.agent.profiler.Profile;
@@ -77,9 +78,12 @@ public final class QueryScopeAgent {
             logCallTreePackages(application);
         }
         AgentInstaller.install(instrumentation, config.entryMethods(), callTreePackages);
+        MethodTracer tracer = new MethodTracer(instrumentation::getAllLoadedClasses,
+                (className, methodName) -> AgentInstaller.installMethodTrace(instrumentation, className, methodName));
+        startTraces(tracer, config.traceMethods());
         SampleStore samples = new SampleStore(Clock.systemUTC(), STORED_SAMPLES, SAMPLE_AGE);
         Sampling sampling = config.sampling() ? Sampling.start(samples, config.sampleInterval()) : null;
-        startPanel(config, store, callTreePackages, application, samples);
+        startPanel(config, store, callTreePackages, application, samples, tracer);
         if (config.printSummary()) {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 if (sampling != null) {
@@ -120,11 +124,22 @@ public final class QueryScopeAgent {
         }
     }
 
+    private static void startTraces(MethodTracer tracer, List<String> methods) {
+        for (String method : methods) {
+            try {
+                tracer.start(method);
+                LOGGER.log(System.Logger.Level.INFO, "QueryScope traces the calls of " + method);
+            } catch (RuntimeException e) {
+                LOGGER.log(System.Logger.Level.WARNING, "QueryScope cannot trace " + method + ": " + e.getMessage());
+            }
+        }
+    }
+
     private static void startPanel(AgentConfig config, ReportStore store, AppPackages callTreePackages,
-                                   AppPackages application, SampleStore samples) {
+                                   AppPackages application, SampleStore samples, MethodTracer tracer) {
         try {
             LocalServer panel = PanelServer.start(config.port(), config.portGiven(), store, callTreePackages,
-                    application, samples);
+                    application, samples, tracer);
             String url = "http://localhost:" + panel.port();
             System.setProperty(AgentProperties.PANEL_PORT, String.valueOf(panel.port()));
             LOGGER.log(System.Logger.Level.INFO, "QueryScope panel is running at " + url);

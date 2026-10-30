@@ -73,6 +73,7 @@ const VIEWS = {
     'sql/requests': 'view-requests',
     'java/profile': 'view-profile',
     'java/calls': 'view-calls',
+    'java/traces': 'view-traces',
 };
 const PROFILE_WINDOWS = [
     {label: '1 min', value: 60},
@@ -80,6 +81,8 @@ const PROFILE_WINDOWS = [
     {label: '15 min', value: 900},
 ];
 const PROFILE_REFRESH_MS = 5000;
+const TRACE_REFRESH_MS = 2000;
+const UNTRACEABLE_PREFIXES = ['java.', 'jdk.', 'sun.', 'com.sun.', 'me.fertiz.queryscope.agent.', '('];
 const FLAME_ROW = 22;
 const FLAME_MAX_NODES = 8000;
 const FLAME_MIN_PX = 3;
@@ -124,6 +127,12 @@ const state = {
         data: null,
         layout: [],
         loadedAt: 0,
+    },
+    traces: {
+        data: null,
+        inFlight: null,
+        loadedAt: 0,
+        selected: null,
     },
     windowMs: WINDOWS[0].ms,
     renderedRequestId: undefined,
@@ -172,6 +181,10 @@ byId('only-findings').addEventListener('change', event => {
 byId('only-slow-code').addEventListener('change', event => {
     state.onlySlowCode = event.target.checked;
     renderAll();
+});
+byId('trace-form').addEventListener('submit', event => {
+    event.preventDefault();
+    startTrace(byId('trace-method').value);
 });
 byId('profile-search').addEventListener('input', event => {
     state.profile.search = event.target.value.trim();
@@ -390,6 +403,9 @@ function selectView(view) {
     if (view === 'java/profile') {
         loadProfile();
     }
+    if (view === 'java/traces') {
+        loadTraces();
+    }
 }
 
 function openRequest(id) {
@@ -443,6 +459,10 @@ function onEverySecond() {
     if (state.view === 'java/profile' && !state.paused && state.profile.scope === null
         && state.profile.inFlight === null && Date.now() - state.profile.loadedAt >= PROFILE_REFRESH_MS) {
         loadProfile();
+    }
+    if (state.view === 'java/traces' && !state.paused && state.traces.inFlight === null
+        && Date.now() - state.traces.loadedAt >= TRACE_REFRESH_MS) {
+        loadTraces();
     }
     const current = displayTime();
     for (const {node, end} of state.feedAgeCells) {
@@ -882,6 +902,7 @@ function renderHotList() {
             {title: yours ? 'In it and its libraries' : 'Self', width: '170px', number: true},
             {title: 'Total', width: '90px', number: true},
             {title: 'Share of samples', width: '22%'},
+            {title: '', width: '80px'},
         ],
         methods.slice(0, HOT_ROWS).map(method => {
             const count = yours ? method.selfWithLibraries : method.self;
@@ -905,7 +926,8 @@ function renderHotList() {
                         createElement('div',
                             {class: 'call-share-total', style: {width: cssPercent(method.total / samples)}}),
                         createElement('div',
-                            {class: 'call-share-self', style: {width: cssPercent(count / samples)}}))));
+                            {class: 'call-share-self', style: {width: cssPercent(count / samples)}}))),
+                createElement('td', {}, createTraceButton(method.method)));
         }));
     hot.classList.add('call-table');
     byId('hot-list').replaceChildren(hot);
@@ -1099,6 +1121,192 @@ function renderFeed() {
                     createElement('div', {class: 'path', title: finding.callSite ?? finding.method ?? ''},
                         createElement('span', {class: 'muted'}, findingLocation(finding)))));
         })));
+}
+
+function createTraceButton(method) {
+    if (UNTRACEABLE_PREFIXES.some(prefix => method.startsWith(prefix)) || method.includes('$$')) {
+        return null;
+    }
+    return createElement('button', {
+        type: 'button',
+        class: 'text-button',
+        title: 'Record every call of this method',
+        onclick: event => {
+            event.stopPropagation();
+            startTrace(toMethodReference(method));
+        },
+    }, 'Trace');
+}
+
+function toMethodReference(method) {
+    const dot = method.lastIndexOf('.');
+    return `${method.slice(0, dot)}#${method.slice(dot + 1)}`;
+}
+
+async function startTrace(reference) {
+    byId('trace-error').textContent = '';
+    try {
+        const response = await fetch('api/traces', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({method: reference.trim()}),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(result.error || `the panel answered ${response.status}`);
+        }
+        state.traces.selected = result.method;
+        byId('trace-method').value = '';
+        if (result.loadedClasses === 0) {
+            byId('trace-error').textContent = 'The class is not loaded yet, its calls show up once it is.';
+        }
+    } catch (error) {
+        byId('trace-error').textContent = error.message;
+    }
+    if (state.view === 'java/traces') {
+        loadTraces();
+    } else {
+        selectView('java/traces');
+    }
+}
+
+async function stopTrace(method) {
+    try {
+        const response = await fetch(`api/traces/${encodeURIComponent(method)}`, {method: 'DELETE'});
+        if (!response.ok && response.status !== 404) {
+            throw new Error(`the panel answered ${response.status}`);
+        }
+    } catch (error) {
+        byId('snackbar-action').hidden = true;
+        showSnackbar(`Could not stop tracing ${shortMethod(method)}: ${error.message}`, SNACK_MS);
+    }
+    loadTraces();
+}
+
+async function loadTraces() {
+    const traces = state.traces;
+    traces.inFlight?.abort();
+    const request = traces.inFlight = new AbortController();
+    let data;
+    try {
+        const response = await fetch('api/traces', {signal: request.signal});
+        data = response.ok ? await response.json() : null;
+    } catch (error) {
+        data = null;
+    }
+    if (request.signal.aborted) {
+        return;
+    }
+    traces.inFlight = null;
+    traces.data = data;
+    traces.loadedAt = Date.now();
+    renderTraces();
+}
+
+function renderTraces() {
+    const data = state.traces.data;
+    const traces = data ? data.traces : [];
+    byId('trace-count').textContent = String(traces.length);
+    if (traces.length === 0) {
+        byId('trace-list').replaceChildren(createElement('p', {class: 'empty'}, data
+            ? 'No method is traced yet. Name one above, press Trace next to a hot method in the profiler, '
+            + 'or start the app with trace=com.acme.OrderService#findAll.'
+            : 'Could not load the traced methods.'));
+        byId('trace-details').hidden = true;
+        return;
+    }
+    if (!traces.some(trace => trace.method === state.traces.selected)) {
+        state.traces.selected = traces[0].method;
+    }
+    const table = createTable(
+        [
+            {title: 'Method', width: 'auto'},
+            {title: 'Calls', width: '100px', number: true},
+            {title: 'Failed', width: '90px', number: true},
+            {title: 'Average', width: '100px', number: true},
+            {title: 'p95', width: '100px', number: true},
+            {title: 'Max', width: '100px', number: true},
+            {title: '', width: '80px'},
+        ],
+        traces.map(trace => createElement('tr', {
+                class: `clickable${trace.method === state.traces.selected ? ' selected' : ''}`,
+                onclick: () => {
+                    state.traces.selected = trace.method;
+                    renderTraces();
+                },
+            },
+            createElement('td', {}, createElement('code', {title: trace.method}, shortMethod(trace.method))),
+            createElement('td', {class: 'number'}, formatCount(trace.calls)),
+            createElement('td', {class: trace.failures > 0 ? 'number status-error' : 'number'},
+                formatCount(trace.failures)),
+            createElement('td', {class: 'number'}, trace.calls > 0 ? formatMs(trace.averageMs) : '—'),
+            createElement('td', {class: 'number'}, trace.calls > 0 ? formatMs(trace.p95Ms) : '—'),
+            createElement('td', {class: 'number'}, trace.calls > 0 ? formatMs(trace.maxMs) : '—'),
+            createElement('td', {}, createElement('button', {
+                type: 'button',
+                class: 'text-button',
+                onclick: event => {
+                    event.stopPropagation();
+                    stopTrace(trace.method);
+                },
+            }, 'Stop')))));
+    table.classList.add('call-table');
+    byId('trace-list').replaceChildren(table);
+    renderTraceDetails(traces.find(trace => trace.method === state.traces.selected));
+}
+
+function renderTraceDetails(trace) {
+    const details = byId('trace-details');
+    details.hidden = false;
+    const summary = trace.calls > 0
+        ? `Median ${formatMs(trace.p50Ms)}, p99 ${formatMs(trace.p99Ms)}, ${formatMs(trace.totalMs)} in all calls. `
+        : 'No calls yet. ';
+    details.replaceChildren(
+        createElement('div', {class: 'panel-header'}, createElement('div', {},
+            createElement('h2', {}, createElement('code', {}, trace.method)),
+            createElement('p', {class: 'panel-hint'},
+                `${summary}Traced since ${new Date(parseInstant(trace.since)).toLocaleTimeString()}.`))),
+        createElement('h3', {class: 'section-title'}, 'Slowest calls'),
+        createTracedCallTable(trace.slowest),
+        createElement('h3', {class: 'section-title'}, 'Latest calls'),
+        createTracedCallTable(trace.recent));
+}
+
+function createTracedCallTable(calls) {
+    if (calls.length === 0) {
+        return createElement('p', {class: 'empty'}, 'No calls yet.');
+    }
+    const now = Date.now();
+    const table = createTable(
+        [
+            {title: 'Ended', width: '110px'},
+            {title: 'Duration', width: '120px', number: true},
+            {title: 'Request or task', width: 'auto'},
+            {title: 'Thread', width: '28%'},
+        ],
+        calls.map(call => createElement('tr', {},
+            createElement('td', {}, timeAgo(now - parseInstant(call.endedAt))),
+            createElement('td', {class: call.failed ? 'number status-error' : 'number'},
+                call.failed ? `${formatMs(call.durationMs)}, threw` : formatMs(call.durationMs)),
+            createElement('td', {}, createUnitLink(call)),
+            createElement('td', {class: 'ellipsis', title: call.thread}, call.thread))));
+    table.classList.add('call-table');
+    return table;
+}
+
+function createUnitLink(call) {
+    if (call.unitId === null) {
+        return createElement('span', {class: 'muted'}, 'Outside any request or task');
+    }
+    const report = state.reports.find(candidate => candidate.id === call.unitId);
+    if (!report) {
+        return call.unit;
+    }
+    return createElement('button', {
+        type: 'button',
+        class: 'text-button',
+        onclick: () => report.view.hasSql ? openRequest(report.id) : openCalls(report.id),
+    }, call.unit);
 }
 
 function createTable(columns, rows) {

@@ -51,7 +51,8 @@ class QueryScopeEndToEndTest {
         panelPort = DemoProcess.freePort();
         demo = DemoProcess.start(List.of(
                         DemoProcess.JAVA,
-                        "-javaagent:" + DemoProcess.AGENT_JAR + "=port=" + panelPort,
+                        "-javaagent:" + DemoProcess.AGENT_JAR + "=port=" + panelPort
+                                + ",trace=" + RevenueSheetService.class.getName() + "#dailyRevenue",
                         "-cp", DemoProcess.DEMO_CLASSPATH,
                         DemoApplication.class.getName(),
                         "--server.port=" + appPort),
@@ -216,6 +217,37 @@ class QueryScopeEndToEndTest {
     }
 
     @Test
+    void tracesAMethodNamedAtStartup() throws Exception {
+        assertEquals(200, get(appPort, "/api/reports/daily-revenue").statusCode());
+
+        JsonNode trace = tracedMethod(RevenueSheetService.class.getName() + ".dailyRevenue");
+        assertTrue(trace.path("calls").asLong() >= 1, trace.toString());
+        assertEquals("GET /api/reports/daily-revenue", trace.path("recent").get(0).path("unit").asString());
+        assertTrue(trace.path("maxMs").asDouble() > 0, trace.toString());
+    }
+
+    @Test
+    void startsAndStopsATraceFromThePanel() throws Exception {
+        String method = CustomerSummary.class.getName() + ".of";
+        HttpResponse<String> started = CLIENT.send(HttpRequest.newBuilder(panel("/api/traces"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(
+                        "{\"method\": \"" + CustomerSummary.class.getName() + "#of\"}"))
+                .build(), HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, started.statusCode(), started.body());
+
+        assertEquals(200, get(appPort, "/api/customers/naive").statusCode());
+
+        JsonNode trace = tracedMethod(method);
+        assertTrue(trace.path("calls").asLong() > 1, trace.toString());
+        assertEquals("GET /api/customers/naive", trace.path("slowest").get(0).path("unit").asString());
+        HttpResponse<Void> stopped = CLIENT.send(HttpRequest.newBuilder(panel("/api/traces/" + method)).DELETE().build(),
+                HttpResponse.BodyHandlers.discarding());
+        assertEquals(204, stopped.statusCode());
+        assertFalse(get(panelPort, "/api/traces").body().contains(method));
+    }
+
+    @Test
     void servesThePanelPage() throws Exception {
         HttpResponse<String> page = get(panelPort, "/");
 
@@ -284,6 +316,16 @@ class QueryScopeEndToEndTest {
     private static JsonNode single(JsonNode array) {
         assertEquals(1, array.size(), array.toString());
         return array.get(0);
+    }
+
+    private static JsonNode tracedMethod(String method) throws Exception {
+        JsonNode traces = JSON.readTree(get(panelPort, "/api/traces").body()).path("traces");
+        for (int index = 0; index < traces.size(); index++) {
+            if (traces.get(index).path("method").asString().equals(method)) {
+                return traces.get(index);
+            }
+        }
+        throw new AssertionError(method + " is not traced: " + traces);
     }
 
     private static URI panel(String path) {

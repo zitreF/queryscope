@@ -24,7 +24,8 @@ class AgentConfigTest {
                 "port=9090, nPlusOneThreshold=3,slowQueryMs=250,largeResultRows=1000,maxQueries=50");
 
         assertEquals(new AgentConfig(9090, true, 3, Duration.ofMillis(250), 1000, 50,
-                Duration.ofMillis(100), List.of(), List.of(), true, true, Duration.ofMillis(10), false, true), config);
+                Duration.ofMillis(100), List.of(), List.of(), List.of(), true, true, Duration.ofMillis(10), false, true),
+                config);
     }
 
     @Test
@@ -69,6 +70,14 @@ class AgentConfigTest {
         AgentConfig config = AgentConfig.parse("entry=com.acme.ImportJob#run,entry=com.acme.mail.Digest$Weekly#send");
 
         assertEquals(List.of("com.acme.ImportJob#run", "com.acme.mail.Digest$Weekly#send"), config.entryMethods());
+    }
+
+    @Test
+    void collectsEveryTracedMethod() {
+        AgentConfig config = AgentConfig.parse("trace=com.acme.OrderService#findAll,trace=com.acme.Mapper$Line#toDto");
+
+        assertEquals(List.of("com.acme.OrderService#findAll", "com.acme.Mapper$Line#toDto"), config.traceMethods());
+        assertThrows(IllegalArgumentException.class, () -> AgentConfig.parse("trace=com.acme.OrderService.findAll"));
     }
 
     @Test

@@ -182,7 +182,7 @@ final class ReportJson {
         return json.endArray();
     }
 
-    private static double toMillis(long nanos) {
+    static double toMillis(long nanos) {
         return nanos / 1_000_000.0;
     }
 }

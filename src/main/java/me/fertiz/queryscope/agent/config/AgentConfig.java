@@ -16,6 +16,7 @@ public record AgentConfig(
         int maxQueries,
         Duration slowMethodThreshold,
         List<String> entryMethods,
+        List<String> traceMethods,
         List<String> packages,
         boolean callTree,
         boolean sampling,
@@ -25,17 +26,18 @@ public record AgentConfig(
 ) {
 
     public static final AgentConfig DEFAULTS = new AgentConfig(7070, false, 5, Duration.ofMillis(100), 500, 30,
-            Duration.ofMillis(100), List.of(), List.of(), true, true, Duration.ofMillis(10), false, true);
+            Duration.ofMillis(100), List.of(), List.of(), List.of(), true, true, Duration.ofMillis(10), false, true);
 
     private static final int MAX_SAMPLE_MILLIS = 1000;
 
     private static final Pattern POSITIVE_NUMBER = Pattern.compile("[1-9][0-9]{0,8}");
     private static final String IDENTIFIER = "[\\p{L}_$][\\p{L}\\p{N}_$]*";
     private static final Pattern PACKAGE = Pattern.compile(IDENTIFIER + "(\\." + IDENTIFIER + ")*");
-    private static final Pattern ENTRY_METHOD = Pattern.compile(PACKAGE.pattern() + "#" + IDENTIFIER);
+    private static final Pattern METHOD_REFERENCE = Pattern.compile(PACKAGE.pattern() + "#" + IDENTIFIER);
 
     public AgentConfig {
         entryMethods = List.copyOf(entryMethods);
+        traceMethods = List.copyOf(traceMethods);
         packages = List.copyOf(packages);
     }
 
@@ -51,6 +53,7 @@ public record AgentConfig(
         int maxQueries = DEFAULTS.maxQueries();
         Duration slowMethodThreshold = DEFAULTS.slowMethodThreshold();
         List<String> entryMethods = new ArrayList<>();
+        List<String> traceMethods = new ArrayList<>();
         List<String> packages = new ArrayList<>();
         boolean callTree = DEFAULTS.callTree();
         boolean sampling = DEFAULTS.sampling();
@@ -74,7 +77,8 @@ public record AgentConfig(
                 case "largeResultRows" -> largeResultRows = parsePositiveInt(key, value);
                 case "maxQueries" -> maxQueries = parsePositiveInt(key, value);
                 case "slowMethodMs" -> slowMethodThreshold = Duration.ofMillis(parsePositiveInt(key, value));
-                case "entry" -> entryMethods.add(parseEntryMethod(value));
+                case "entry" -> entryMethods.add(parseMethodReference(key, value));
+                case "trace" -> traceMethods.add(parseMethodReference(key, value));
                 case "package" -> packages.add(parsePackageName(value));
                 case "callTree", "profile" -> callTree = parseFlag(key, value);
                 case "sampling" -> sampling = parseFlag(key, value);
@@ -83,21 +87,26 @@ public record AgentConfig(
                 case "summary" -> printSummary = parseFlag(key, value);
                 default -> throw new IllegalArgumentException("Unknown QueryScope option '" + key
                         + "', known options are port, nPlusOneThreshold, slowQueryMs, largeResultRows, maxQueries,"
-                        + " slowMethodMs, entry, package, callTree, sampling, sampleMs, open and summary");
+                        + " slowMethodMs, entry, trace, package, callTree, sampling, sampleMs, open and summary");
             }
         }
         return new AgentConfig(port, portGiven, nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries,
-                slowMethodThreshold, entryMethods, packages, callTree, sampling, sampleInterval, openPanel, printSummary);
+                slowMethodThreshold, entryMethods, traceMethods, packages, callTree, sampling, sampleInterval, openPanel,
+                printSummary);
     }
 
     public Thresholds thresholds() {
         return new Thresholds(nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries, slowMethodThreshold);
     }
 
-    private static String parseEntryMethod(String value) {
-        if (!ENTRY_METHOD.matcher(value).matches()) {
-            throw new IllegalArgumentException(
-                    "QueryScope option entry needs a class and a method like com.acme.ImportJob#run, got '" + value + "'");
+    public static boolean isMethodReference(String value) {
+        return METHOD_REFERENCE.matcher(value).matches();
+    }
+
+    private static String parseMethodReference(String key, String value) {
+        if (!isMethodReference(value)) {
+            throw new IllegalArgumentException("QueryScope option " + key
+                    + " needs a class and a method like com.acme.ImportJob#run, got '" + value + "'");
         }
         return value;
     }

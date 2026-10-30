@@ -37,6 +37,8 @@ prints a summary of the session. The [usage guide](docs/usage.md) has the detail
   the method that loops.
 - **A sampling profiler** on JDK Flight Recorder that sees every method of any Java program, your code, libraries and
   the JDK, as a flame graph for the whole app, one thread, one request or one endpoint.
+- **Method tracing on demand**: pick any method of your code or a library while the app runs and see every call, its
+  percentiles and the requests behind its slowest calls.
 - **Live tracking** of requests on a moving time axis, and a **session summary** of endpoints, findings and the
   hottest methods when the app stops.
 

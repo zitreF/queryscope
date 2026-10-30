@@ -208,6 +208,19 @@ requests and tasks that ran your code, also those without any SQL. The details s
 
 **CPU samples** opens the profiler for the request, **SQL queries** opens it in the SQL area.
 
+### Java → Traced methods
+
+Tracing records every call of one method you pick, in your code or in a library, while the application runs: no
+restart, and it stops when you press **Stop**. Start it with **Trace** next to a method in the profiler's hot methods,
+by naming the method in the view as `com.acme.OrderService#findAll`, or with `--trace=com.acme.OrderService#findAll`
+at startup. Nested classes are written with `$`, as in `com.acme.Mapper$Line#toDto`, and every overload of the name
+is traced together.
+
+For every traced method the view shows the calls, the ones that threw, the average, p95 and slowest time. Below are
+its ten slowest calls and its fifty latest ones, each with the time it took, the thread, and the request or task it
+ran in, one click away. A class that is not loaded yet is traced as soon as it loads. Classes of the JDK and of
+QueryScope cannot be traced, and at most 20 methods are traced at a time.
+
 ## Findings
 
 | Finding           | Area | Reported when                                                                 | Option              |
@@ -257,6 +270,7 @@ after the jar path, separated by commas: `-javaagent:queryscope.jar=port=9090,sl
 | `sampling`          | `true`     | Runs the sampling profiler                                              |
 | `sampleMs`          | `10`       | How often the profiler takes a sample, from 1 to 1000 ms                |
 | `entry`             | none       | `Class#method` whose whole call becomes one task, can be repeated       |
+| `trace`             | none       | `Class#method` whose every call is recorded, can be repeated            |
 | `attach`            | none       | Hub only: attaches to this process ID and exits                         |
 
 `open`, `summary`, `callTree` and `sampling` work without a value, so `--open` means `--open=true`. An unknown option or
@@ -333,6 +347,9 @@ The panel is backed by a small JSON API on the same port:
 | `GET /api/events`              | a server-sent events stream with one `request` event per finished request             |
 | `GET /api/requests/{id}/calls` | the call tree of one stored request, with the queries of each method                  |
 | `GET /api/profile`             | a flame graph and the hot methods                                                     |
+| `GET /api/traces`              | the traced methods with their counts, percentiles, slowest and latest calls           |
+| `POST /api/traces`             | starts tracing the method in a body like `{"method": "com.acme.OrderService#findAll"}` |
+| `DELETE /api/traces/{method}`  | stops tracing it, named as `com.acme.OrderService.findAll`                            |
 
 A request or entry task keeps its first 1000 queries in `queries`; any beyond that are counted in `omittedQueries` and
 their time in `omittedMs`, and they still count for *Too many queries* and the time in the database.
