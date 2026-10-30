@@ -309,7 +309,10 @@ visible right after attaching to a large application.
 - **`AttachEndToEndTest`** starts the demo without QueryScope, starts the hub, attaches to the demo through the hub's
   API and checks that the agent finds the N+1 in the running application.
 - **`PlainJavaEndToEndTest`** runs a plain `main` program on H2 with the agent and checks its task, the N+1, and that
-  the program still exits and prints its summary.
+  the program still exits and prints its summary, and a program that serves a request with the JDK's `HttpServer`.
+- **`TomcatEndToEndTest`** deploys `bookshelf.war`, a servlet with its H2 driver in `WEB-INF/lib` that the
+  `bookshelfWar` task packs, to a standalone Tomcat started with the agent, and checks the N+1 at the servlet's call
+  site and its call tree. It runs only with `-Ptomcat=<Tomcat folder>`, so the normal build downloads nothing.
 
 GitHub Actions runs the same build on Temurin 25 for every push and pull request.
 

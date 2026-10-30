@@ -51,15 +51,35 @@ tasks.shadowJar {
 
 val agentJar = tasks.shadowJar.flatMap { it.archiveFile }
 val demoClasspath = sourceSets.test.get().runtimeClasspath - sourceSets.main.get().output
+val tomcatHome = providers.gradleProperty("tomcat")
+
+val bookshelfWar = tasks.register<Zip>("bookshelfWar") {
+    description = "Packs the servlet from the tests into a WAR for the Tomcat end-to-end test."
+    archiveFileName = "bookshelf.war"
+    destinationDirectory = layout.buildDirectory.dir("e2e")
+    from("src/test/webapp")
+    into("WEB-INF/classes") {
+        from(sourceSets.test.get().output.classesDirs) {
+            include("me/fertiz/queryscope/war/**")
+        }
+    }
+    into("WEB-INF/lib") {
+        from(configurations.testRuntimeClasspath.map { classpath -> classpath.filter { it.name.startsWith("h2-") } })
+    }
+}
 
 tasks.test {
     useJUnitPlatform()
     inputs.file(agentJar).withPropertyName("agentJar")
+    inputs.file(bookshelfWar.flatMap { it.archiveFile }).withPropertyName("bookshelfWar")
+    inputs.property("tomcat", tomcatHome.orElse(""))
     jvmArgs("-XX:+EnableDynamicAgentLoading", "-Djdk.attach.allowAttachSelf=true")
     jvmArgumentProviders.add(CommandLineArgumentProvider {
-        listOf(
+        listOfNotNull(
             "-Dqueryscope.agentJar=${agentJar.get().asFile.absolutePath}",
             "-Dqueryscope.demoClasspath=${demoClasspath.asPath}",
+            "-Dqueryscope.bookshelfWar=${bookshelfWar.get().archiveFile.get().asFile.absolutePath}",
+            tomcatHome.orNull?.let { "-Dqueryscope.tomcat=$it" },
         )
     })
 }

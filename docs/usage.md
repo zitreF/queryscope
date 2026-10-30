@@ -127,6 +127,17 @@ tasks.bootRun {
 **IntelliJ IDEA**: *Run → Edit Configurations → Modify options → Add VM options*, then enter
 `-javaagent:/path/to/queryscope.jar`. Or start the app as usual and attach from the hub.
 
+**A WAR in a standalone Tomcat**: add the agent to `CATALINA_OPTS`, for example in `bin/setenv.sh`, and name your
+packages, because Tomcat's own main class says nothing about them:
+
+```bash
+export CATALINA_OPTS="-javaagent:/path/to/queryscope.jar=package=com.acme.shop"
+```
+
+On Windows the same line goes into `bin\setenv.bat` as `set "CATALINA_OPTS=..."`. Attaching from the hub works on a
+running Tomcat as well; pass `--package=com.acme.shop` to the hub so the call tree knows your code. A JDBC driver in
+the WAR's `WEB-INF/lib` is seen like any other.
+
 **Docker**: add the jar to the image and the option to `JAVA_TOOL_OPTIONS`. The panel listens on loopback only, so
 reach it from inside the container's network namespace, for example with `docker exec` and `curl`, or attach from a
 QueryScope hub that runs in the same container.

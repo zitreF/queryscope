@@ -158,3 +158,10 @@ attach it in production.
 The Gradle wrapper is included, the build needs JDK 25 installed. `build` writes the agent to `build/libs/queryscope.jar`
 and runs every test, from unit tests to end-to-end tests that start the demo in separate JVMs with the agent attached,
 through the launcher and through the hub. [How it works](docs/how-it-works.md#testing) lists them.
+
+One more end-to-end test deploys a WAR to a standalone Tomcat. It needs a Tomcat 10.1 or newer on disk and runs only
+when you point the build at it:
+
+```bash
+./gradlew test -Ptomcat=/path/to/apache-tomcat-11.0.27
+```
