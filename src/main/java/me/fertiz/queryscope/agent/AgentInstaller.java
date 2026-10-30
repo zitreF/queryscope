@@ -2,6 +2,7 @@ package me.fertiz.queryscope.agent;
 
 import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.appcode.CallSites;
+import me.fertiz.queryscope.agent.bootstrap.HttpServerBridge;
 import me.fertiz.queryscope.agent.calltree.CallTracer;
 import me.fertiz.queryscope.agent.calltree.MethodAdvice;
 import me.fertiz.queryscope.agent.methodtrace.MethodTraceAdvice;
@@ -10,6 +11,8 @@ import me.fertiz.queryscope.agent.trace.ConnectionReleaseAdvice;
 import me.fertiz.queryscope.agent.trace.EntryAdvice;
 import me.fertiz.queryscope.agent.trace.ExecutePreparedAdvice;
 import me.fertiz.queryscope.agent.trace.ExecuteSqlAdvice;
+import me.fertiz.queryscope.agent.trace.JdkHttpServerAdvice;
+import me.fertiz.queryscope.agent.trace.JdkHttpServerRequests;
 import me.fertiz.queryscope.agent.trace.ParameterAdvice;
 import me.fertiz.queryscope.agent.trace.PrepareStatementAdvice;
 import me.fertiz.queryscope.agent.trace.RowAdvice;
@@ -19,17 +22,23 @@ import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
 import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
+import net.bytebuddy.dynamic.ClassFileLocator;
 import net.bytebuddy.dynamic.Nexus;
+import net.bytebuddy.dynamic.loading.ClassInjector;
 import net.bytebuddy.matcher.ElementMatcher;
 import net.bytebuddy.utility.JavaModule;
 
+import java.io.IOException;
 import java.lang.instrument.Instrumentation;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static net.bytebuddy.matcher.ElementMatchers.hasSuperType;
 import static net.bytebuddy.matcher.ElementMatchers.is;
@@ -43,6 +52,7 @@ import static net.bytebuddy.matcher.ElementMatchers.isSynthetic;
 import static net.bytebuddy.matcher.ElementMatchers.nameStartsWith;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static net.bytebuddy.matcher.ElementMatchers.namedOneOf;
+import static net.bytebuddy.matcher.ElementMatchers.none;
 import static net.bytebuddy.matcher.ElementMatchers.not;
 import static net.bytebuddy.matcher.ElementMatchers.takesArgument;
 import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
@@ -53,6 +63,8 @@ public final class AgentInstaller {
     private static final String[] EXECUTE_METHODS = {"execute", "executeQuery", "executeUpdate", "executeLargeUpdate"};
     private static final String[] BATCH_METHODS = {"executeBatch", "executeLargeBatch"};
     private static final String[] RELEASE_METHODS = {"close", "commit", "rollback"};
+    private static final String HTTP_SERVER_BRIDGE = "me.fertiz.queryscope.agent.bootstrap.HttpServerBridge";
+    private static final String HTTP_SERVER_FILTER_CHAIN = "com.sun.net.httpserver.Filter$Chain";
 
     private AgentInstaller() {
     }
@@ -86,6 +98,27 @@ public final class AgentInstaller {
                                 MethodTraceAdvice.class.getName()))
                 .installOn(instrumentation);
         return () -> transformer.reset(instrumentation, AgentBuilder.RedefinitionStrategy.RETRANSFORMATION);
+    }
+
+    public static void installJdkHttpServerHook(Instrumentation instrumentation) throws IOException {
+        Path folder = Files.createTempDirectory("queryscope-bootstrap");
+        ClassFileLocator agentClasses = ClassFileLocator.ForClassLoader.of(AgentInstaller.class.getClassLoader());
+        Class<?> bridge = ClassInjector.UsingInstrumentation
+                .of(folder.toFile(), ClassInjector.UsingInstrumentation.Target.BOOTSTRAP, instrumentation)
+                .injectRaw(Set.of(HTTP_SERVER_BRIDGE), agentClasses)
+                .get(HTTP_SERVER_BRIDGE);
+        HttpServerBridge.connect(JdkHttpServerRequests::requestStarted, JdkHttpServerRequests::requestFinished);
+        new AgentBuilder.Default()
+                .disableClassFormatChanges()
+                .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                .with(new ErrorLogger())
+                .ignore(none())
+                .assureReadEdgeTo(instrumentation, bridge)
+                .type(named(HTTP_SERVER_FILTER_CHAIN))
+                .transform(new AgentBuilder.Transformer.ForAdvice()
+                        .include(AgentInstaller.class.getClassLoader())
+                        .advice(named("doFilter").and(takesArguments(1)), JdkHttpServerAdvice.class.getName()))
+                .installOn(instrumentation);
     }
 
     private static AgentBuilder retransformingBuilder() {

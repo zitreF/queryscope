@@ -12,11 +12,11 @@ import java.util.Optional;
 public final class Servlets {
 
     static final List<String> NAMESPACES = List.of("jakarta.servlet", "javax.servlet");
+    static final int ASSUMED_STATUS = 200;
+    static final int FAILED_STATUS = 500;
 
     private static final MethodType GETTER = MethodType.methodType(Object.class, Object.class);
     private static final MethodType INT_GETTER = MethodType.methodType(int.class, Object.class);
-    private static final int ASSUMED_STATUS = 200;
-    private static final int FAILED_STATUS = 500;
 
     private static final ClassValue<Optional<RequestGetters>> REQUESTS = new ClassValue<>() {
         @Override

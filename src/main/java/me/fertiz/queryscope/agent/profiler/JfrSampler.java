@@ -7,6 +7,7 @@ import jdk.jfr.consumer.RecordedMethod;
 import jdk.jfr.consumer.RecordedStackTrace;
 import jdk.jfr.consumer.RecordedThread;
 import jdk.jfr.consumer.RecordingStream;
+import me.fertiz.queryscope.agent.appcode.CallSites;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -35,7 +36,7 @@ final class JfrSampler {
         stream.onEvent(NATIVE_SAMPLE, event -> storeSample(store, event, false));
         AtomicBoolean stopping = new AtomicBoolean();
         Thread consumer = new Thread(() -> consume(stream::start, stopping, fallback),
-                Sampling.THREAD_NAME_PREFIX + "flight-recorder");
+                CallSites.THREAD_NAME_PREFIX + "flight-recorder");
         consumer.setDaemon(true);
         consumer.start();
         return () -> {
@@ -71,7 +72,7 @@ final class JfrSampler {
             return;
         }
         String name = thread.getJavaName();
-        if (Sampling.isOwnThread(name)) {
+        if (CallSites.isQueryScopeThread(name)) {
             return;
         }
         List<RecordedFrame> frames = stack.getFrames();

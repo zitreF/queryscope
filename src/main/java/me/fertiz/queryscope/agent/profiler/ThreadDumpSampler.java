@@ -1,5 +1,7 @@
 package me.fertiz.queryscope.agent.profiler;
 
+import me.fertiz.queryscope.agent.appcode.CallSites;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,7 +24,7 @@ final class ThreadDumpSampler {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
-        }, Sampling.THREAD_NAME_PREFIX + "thread-dumps");
+        }, CallSites.THREAD_NAME_PREFIX + "thread-dumps");
         sampler.setDaemon(true);
         sampler.start();
         return sampler::interrupt;
@@ -34,7 +36,7 @@ final class ThreadDumpSampler {
             Thread thread = entry.getKey();
             StackTraceElement[] stack = entry.getValue();
             if (stack.length == 0 || thread == Thread.currentThread() || thread.getState() != Thread.State.RUNNABLE
-                    || Sampling.isOwnThread(thread.getName())) {
+                    || CallSites.isQueryScopeThread(thread.getName())) {
                 continue;
             }
             List<String> methods = new ArrayList<>(stack.length);

@@ -7,6 +7,7 @@ import java.util.Optional;
 public final class CallSites {
 
     public static final String AGENT_PACKAGE_PREFIX = "me.fertiz.queryscope.agent.";
+    public static final String THREAD_NAME_PREFIX = "queryscope-";
 
     private static final StackWalker WALKER = StackWalker.getInstance();
     private static final List<String> FRAMEWORK_PACKAGES = List.of(
@@ -48,6 +49,10 @@ public final class CallSites {
         int methodDot = qualifiedMethod.lastIndexOf('.');
         int typeDot = qualifiedMethod.lastIndexOf('.', methodDot - 1);
         return qualifiedMethod.substring(typeDot + 1);
+    }
+
+    public static boolean isQueryScopeThread(String threadName) {
+        return threadName != null && threadName.startsWith(THREAD_NAME_PREFIX);
     }
 
     static boolean isGenerated(String className) {

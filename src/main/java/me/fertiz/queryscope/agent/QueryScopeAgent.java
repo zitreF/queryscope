@@ -78,6 +78,7 @@ public final class QueryScopeAgent {
             logCallTreePackages(application);
         }
         AgentInstaller.install(instrumentation, config.entryMethods(), callTreePackages);
+        hookJdkHttpServer(instrumentation);
         MethodTracer tracer = new MethodTracer(instrumentation::getAllLoadedClasses,
                 (className, methodName) -> AgentInstaller.installMethodTrace(instrumentation, className, methodName));
         startTraces(tracer, config.traceMethods());
@@ -121,6 +122,14 @@ public final class QueryScopeAgent {
         if (launcherPid != null) {
             ProcessHandle.of(Long.parseLong(launcherPid))
                     .ifPresent(launcher -> launcher.onExit().thenRun(() -> System.exit(0)));
+        }
+    }
+
+    private static void hookJdkHttpServer(Instrumentation instrumentation) {
+        try {
+            AgentInstaller.installJdkHttpServerHook(instrumentation);
+        } catch (IOException | RuntimeException | LinkageError e) {
+            LOGGER.log(System.Logger.Level.WARNING, "QueryScope cannot see requests of the JDK's HttpServer: " + e);
         }
     }
 

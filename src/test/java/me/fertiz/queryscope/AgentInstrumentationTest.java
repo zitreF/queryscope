@@ -1,5 +1,6 @@
 package me.fertiz.queryscope;
 
+import com.sun.net.httpserver.HttpServer;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import jakarta.servlet.DispatcherType;
@@ -15,6 +16,8 @@ import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.calltree.CallNode;
 import me.fertiz.queryscope.agent.findings.QueryAnalyzer;
 import me.fertiz.queryscope.agent.findings.TooManyQueries;
+import me.fertiz.queryscope.agent.http.HttpSupport;
+import me.fertiz.queryscope.agent.http.LocalServer;
 import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
 import me.fertiz.queryscope.agent.methodtrace.TracedMethod;
 import me.fertiz.queryscope.agent.trace.QueryExecution;
@@ -31,6 +34,12 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.lang.instrument.Instrumentation;
 import java.lang.reflect.Proxy;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -39,6 +48,7 @@ import java.sql.Statement;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -56,10 +66,11 @@ class AgentInstrumentationTest {
     private static Instrumentation instrumentation;
 
     @BeforeAll
-    static void installAgent() throws SQLException {
+    static void installAgent() throws SQLException, IOException {
         instrumentation = ByteBuddyAgent.install();
         AgentInstaller.install(instrumentation, List.of(ImportJob.class.getName() + "#run"),
                 AppPackages.of(List.of(BookCatalog.class.getPackageName())));
+        AgentInstaller.installJdkHttpServerHook(instrumentation);
         UnitTracer.publishTo(TRACES::add);
 
         HikariConfig config = new HikariConfig();
@@ -275,6 +286,51 @@ class AgentInstrumentationTest {
     }
 
     @Test
+    void tracesRequestsOfTheJdkHttpServer() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.createContext("/books", exchange -> {
+            try {
+                findTitle();
+            } catch (SQLException e) {
+                throw new IOException(e);
+            }
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            assertEquals(204, send(server.getAddress().getPort(), "/books?id=1"));
+
+            UnitTrace trace = awaitTrace("/books?id=1");
+            assertEquals(UnitKind.HTTP, trace.kind());
+            assertEquals("GET", trace.method());
+            assertEquals(204, trace.status());
+            assertEquals(1, trace.queries().size());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void leavesTheRequestsOfQueryScopeItselfAlone() throws Exception {
+        LocalServer server = LocalServer.start(0, true, "queryscope-test", Map.of("/books", exchange -> {
+            try {
+                findTitle();
+            } catch (SQLException e) {
+                throw new IOException(e);
+            }
+            HttpSupport.sendStatus(exchange, 204);
+        }));
+        try {
+            assertEquals(204, send(server.port(), "/books"));
+
+            assertTrue(TRACES.stream().noneMatch(trace -> trace.kind() == UnitKind.HTTP), TRACES.toString());
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
     void pointsAtApplicationCodeThatRanTheQuery() {
         handle(request(DispatcherType.REQUEST, "/books"), AgentInstrumentationTest::findTitle);
 
@@ -334,6 +390,23 @@ class AgentInstrumentationTest {
         assertEquals("BookCatalog.titles", trace.path());
         assertTrue(titles.startedBeforeUnit());
         assertEquals(List.of(0, 1), single(titles.children()).queryIndexes());
+    }
+
+    private static int send(int port, String path) throws Exception {
+        return HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .build(), HttpResponse.BodyHandlers.discarding()).statusCode();
+    }
+
+    private static UnitTrace awaitTrace(String path) throws InterruptedException {
+        for (int attempt = 0; attempt < 100; attempt++) {
+            for (UnitTrace trace : TRACES) {
+                if (trace.path().equals(path)) {
+                    return trace;
+                }
+            }
+            Thread.sleep(50);
+        }
+        throw new AssertionError("No trace of " + path + " in " + TRACES);
     }
 
     private static void assertEveryCallFitsIn(UnitTrace trace) {

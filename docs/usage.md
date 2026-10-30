@@ -285,7 +285,8 @@ findings still go to the log.
 sits in a sub-package, or your code spans several packages, list them: `--package=com.acme.shop --package=com.acme.billing`.
 
 **Requests and tasks.** HTTP requests are recognized in any servlet container, on `jakarta.servlet` and
-`javax.servlet`, so Spring Boot 2, 3 and 4, Tomcat, Jetty and Undertow all work. Queries outside a request, in
+`javax.servlet`, so Spring Boot 2, 3 and 4, Tomcat, Jetty and Undertow all work, and in the JDK's own
+`com.sun.net.httpserver.HttpServer`, also when its handlers are lambdas. Queries outside a request, in
 scheduled jobs, message listeners, batch runs or a plain `main`, become tasks: a task starts with the first query,
 ends when the connection is closed or the transaction committed, and is named after the outermost method of yours
 that was running, such as `DigestJob.prepareDigest`. `entry=com.acme.ImportJob#run` turns every call of that method
@@ -425,7 +426,7 @@ production.
 - Queries a request runs on another thread (`DeferredResult`, `@Async`, `CompletableFuture`) show up as separate tasks
   rather than as part of the request.
 - Reactive stacks are not covered: WebFlux and Vert.x requests are not recognized, and R2DBC is not JDBC.
-- HTTP servers that are not servlet containers, such as the JDK's `HttpServer` or Netty, are not recognized as
+- HTTP servers that are neither servlet containers nor the JDK's `HttpServer`, such as Netty, are not recognized as
   requests. Their queries still show up as tasks.
 - `Statement.addBatch(sql)` batches are not recorded. Prepared statement batches are.
 - QueryScope cannot tell by itself that code under a framework namespace is yours, as in Spring PetClinic's

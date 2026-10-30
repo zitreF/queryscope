@@ -43,8 +43,8 @@ prints a summary of the session. The [usage guide](docs/usage.md) has the detail
   hottest methods when the app stops.
 
 It works with any JDBC driver and pool, Hibernate, Spring Data, jOOQ or plain JDBC, recognizes HTTP requests in any
-servlet container on `jakarta.servlet` and `javax.servlet`, and groups everything else, scheduled jobs, listeners,
-batch runs and plain `main` programs, into tasks. Nothing goes into your `pom.xml` or `build.gradle`.
+servlet container on `jakarta.servlet` and `javax.servlet` and in the JDK's built-in `HttpServer`, and groups
+everything else, scheduled jobs, listeners, batch runs and plain `main` programs, into tasks. Nothing goes into your `pom.xml` or `build.gradle`.
 
 ## Try it on the demo
 

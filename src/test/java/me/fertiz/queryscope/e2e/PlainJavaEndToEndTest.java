@@ -1,5 +1,6 @@
 package me.fertiz.queryscope.e2e;
 
+import me.fertiz.queryscope.plain.PlainHttpServerApp;
 import me.fertiz.queryscope.plain.PlainJdbcApp;
 import org.junit.jupiter.api.Test;
 
@@ -37,6 +38,15 @@ class PlainJavaEndToEndTest {
     }
 
     @Test
+    void tracesRequestsOfTheJdkHttpServer() throws Exception {
+        String output = run(PlainHttpServerApp.class, "", "e2e-plain-http-server.log");
+
+        assertTrue(output.contains("Books: 3"), output);
+        assertTrue(output.contains("GET /books -> 200, 1 query in"), output);
+        assertFalse(output.contains("cannot see requests of the JDK's HttpServer"), output);
+    }
+
+    @Test
     void skipsTheSummaryWhenAskedTo() throws Exception {
         String output = run(",summary=false", "e2e-plain-no-summary.log");
 
@@ -45,12 +55,17 @@ class PlainJavaEndToEndTest {
     }
 
     private static String run(String options, String logName, String... programArguments) throws Exception {
+        return run(PlainJdbcApp.class, options, logName, programArguments);
+    }
+
+    private static String run(Class<?> program, String options, String logName, String... programArguments)
+            throws Exception {
         Path log = Path.of("build", logName);
         Files.createDirectories(log.toAbsolutePath().getParent());
         List<String> command = new ArrayList<>(List.of(
                 DemoProcess.JAVA,
                 "-javaagent:" + DemoProcess.AGENT_JAR + "=port=" + DemoProcess.freePort() + options,
-                "-cp", DemoProcess.DEMO_CLASSPATH, PlainJdbcApp.class.getName()));
+                "-cp", DemoProcess.DEMO_CLASSPATH, program.getName()));
         command.addAll(List.of(programArguments));
         Process process = new ProcessBuilder(command)
                 .redirectErrorStream(true)

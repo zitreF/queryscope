@@ -97,6 +97,7 @@ matcher and an advice class:
 | implementations of `java.sql.ResultSet`          | `next()`                                            | `RowAdvice`             |
 | the classes named by `entry=`                    | the methods named by `entry=`                       | `EntryAdvice`           |
 | classes of your packages                         | every method except constructors, bridges, synthetic and native ones | `MethodAdvice` |
+| the JDK's `com.sun.net.httpserver.Filter$Chain`  | `doFilter(exchange)`                                | `JdkHttpServerAdvice`   |
 
 The choices behind it:
 
@@ -111,6 +112,12 @@ The choices behind it:
   reaches the application, and a class ByteBuddy cannot transform is logged and left as it was.
 - **No servlet dependency.** `Servlets` reads the method, URI, query string, dispatcher type and status through
   `MethodHandle`s looked up once per request class, so one advice serves `jakarta.servlet` and `javax.servlet`.
+- **A bridge for the JDK's HttpServer.** Its handlers are usually lambdas, which cannot be instrumented, so the hook
+  sits on `Filter.Chain.doFilter` inside the JDK, which every exchange passes. Code in the JDK cannot see classes on
+  the application's class path, so `HttpServerBridge` is injected into the bootstrap class loader and given a read
+  edge from the `jdk.httpserver` module. The inlined advice only calls the bridge, and the bridge hands the exchange
+  to `JdkHttpServerRequests` in the agent, which opens and closes the request. Exchanges on QueryScope's own threads,
+  the panel and the hub, are left out.
 - **Isolation.** The agent ignores its own classes, ByteBuddy, `java.*`, `jdk.*`, `sun.*` and `com.sun.*`. ByteBuddy is
   shaded into `me.fertiz.queryscope.agent.shaded`, so it never clashes with the ByteBuddy that Hibernate brings, and
   `Nexus` injection is turned off because inlined advice does not need it.
@@ -121,7 +128,7 @@ The choices behind it:
 
 - **HTTP requests** start in `ServletAdvice` when a `REQUEST` dispatch enters the first `FilterChain.doFilter` or
   `HttpServlet.service` on the thread, and end when that call returns. Forwards, includes and nested filters land in
-  the same request.
+  the same request. Requests of the JDK's `HttpServer` start and end with the outermost `Filter.Chain.doFilter`.
 - **Tasks** start with the first query that runs outside a request. A task ends when its connection is closed or its
   transaction committed or rolled back, after a second without queries, or at 1000 queries, so a long batch splits
   into readable pieces. A task ended by its connection lasts until that moment; one that ends because it went idle or
