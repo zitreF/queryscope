@@ -58,6 +58,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 
@@ -252,6 +253,20 @@ class AgentInstrumentationTest {
         });
 
         assertEquals(2, awaitSingleTrace().queries().size());
+    }
+
+    @Test
+    void countsATaskSubmittedTwiceOnlyOnce() throws Exception {
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        FutureTask<String> lookup = new FutureTask<>(AgentInstrumentationTest::findTitleQuietly);
+        handle(request(DispatcherType.REQUEST, "/books"), () -> {
+            pool.execute(lookup);
+            pool.execute(lookup);
+            pool.shutdown();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
+        });
+
+        assertEquals(1, singleTrace().queries().size());
     }
 
     @Test

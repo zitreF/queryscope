@@ -98,7 +98,10 @@ public final class UnitTracer {
     }
 
     static void asyncTaskSubmitted(Object task, ActiveUnit owner) {
-        ASYNC_TASKS.put(task, new PendingTask(owner, owner.attachAsyncTask()));
+        PendingTask replaced = ASYNC_TASKS.put(task, new PendingTask(owner, owner.attachAsyncTask()));
+        if (replaced != null) {
+            release(replaced);
+        }
     }
 
     static boolean asyncTaskStarted(Object task) {
@@ -110,9 +113,7 @@ public final class UnitTracer {
             return false;
         }
         if (inRequestOrEntryTask()) {
-            if (pending.counted()) {
-                pending.owner().attachedTaskEnded(null, 0).forEach(UnitTracer::publish);
-            }
+            release(pending);
             return false;
         }
         finishTaskAtLastActivity();
@@ -254,6 +255,12 @@ public final class UnitTracer {
                     publish(late);
                 }
             });
+        }
+    }
+
+    private static void release(PendingTask pending) {
+        if (pending.counted()) {
+            pending.owner().attachedTaskEnded(null, 0).forEach(UnitTracer::publish);
         }
     }
 

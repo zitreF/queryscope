@@ -11,9 +11,9 @@ final class WeakIdentityMap<V> {
     private final Map<Object, V> values = new ConcurrentHashMap<>();
     private final ReferenceQueue<Object> collected = new ReferenceQueue<>();
 
-    void put(Object key, V value) {
+    V put(Object key, V value) {
         removeCollected();
-        values.put(new IdentityKey(key, collected), value);
+        return values.put(new IdentityKey(key, collected), value);
     }
 
     V get(Object key) {
