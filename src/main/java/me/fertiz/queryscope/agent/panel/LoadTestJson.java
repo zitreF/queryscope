@@ -37,7 +37,12 @@ final class LoadTestJson {
         json.beginObject()
                 .name("id").value(result.id())
                 .name("endpoint").value(result.plan().endpoint())
+                .name("method").value(result.plan().method())
                 .name("target").value(result.plan().target().toString())
+                .name("headerNames").beginArray();
+        result.plan().headers().keySet().forEach(name -> json.value(name));
+        json.endArray()
+                .name("bodyBytes").value(result.plan().bodyBytes().length)
                 .name("requests").value(result.plan().requests())
                 .name("concurrency").value(result.plan().concurrency())
                 .name("state").value(result.state().name().toLowerCase(Locale.ROOT))

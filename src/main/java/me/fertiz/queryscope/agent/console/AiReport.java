@@ -169,13 +169,14 @@ public final class AiReport {
         if (loadTests.isEmpty()) {
             return;
         }
-        out.append("\n## Load tests, newest first\n\nEach test sent one GET request again and again from inside the ")
+        out.append("\n## Load tests, newest first\n\nEach test sent one request again and again from inside the ")
                 .append("application's JVM. Requests per second and the percentiles are what the sender saw; queries, ")
                 .append("time in the database and findings come from QueryScope's traces of the same requests.\n\n")
                 .append("| Request | Sent | Per second | Median | p95 | p99 | Queries per request | Time in database")
                 .append(" | Findings |\n|---|---|---|---|---|---|---|---|---|\n");
         for (LoadTestResult test : loadTests) {
-            out.append("| `GET ").append(tableCell(test.plan().path())).append("` | ").append(test.answered())
+            out.append("| `").append(test.plan().method()).append(' ').append(tableCell(test.plan().path()))
+                    .append("` | ").append(test.answered())
                     .append(" of ").append(test.plan().requests()).append(", ").append(test.plan().concurrency())
                     .append(" at once").append(test.state() == LoadTestResult.State.FINISHED ? ""
                             : ", " + test.state().name().toLowerCase(Locale.ROOT))

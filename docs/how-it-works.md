@@ -260,8 +260,10 @@ nothing. While all calls of a method are among its latest 50, percentiles come f
 ## Load testing
 
 Every HTTP unit remembers the local port its request came in on, from `getLocalPort()` of the servlet request or the
-local address of the JDK's `HttpExchange`. `LoadTestPlan.replaying` turns a stored GET request into a target on
-`127.0.0.1` with that port and its path, and refuses anything else.
+local address of the JDK's `HttpExchange`. `LoadTestPlan.replaying` turns a stored request into a target on
+`127.0.0.1` with that port, and the method, path, headers and body the user gave or the request's own. It accepts only
+the methods `HttpURLConnection` can send, a body only with POST and PUT, header names that are HTTP tokens and values
+without line breaks, so nothing can be smuggled into the request.
 
 `LoadTester` runs one `LoadTest` at a time on up to 50 daemon threads that share a counter of requests to send. Each
 request goes through `HttpURLConnection` without a proxy and without following redirects, and carries the header

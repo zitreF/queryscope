@@ -52,9 +52,10 @@ public record UnitTrace(
     }
 
     public String endpoint() {
-        if (kind == UnitKind.TASK) {
-            return "Task " + path;
-        }
+        return kind == UnitKind.TASK ? "Task " + path : endpointOf(method, path);
+    }
+
+    public static String endpointOf(String method, String path) {
         String route = path.split("\\?", 2)[0];
         route = UUID_SEGMENT.matcher(route).replaceAll("/{uuid}");
         route = NUMBER_SEGMENT.matcher(route).replaceAll("/{id}");

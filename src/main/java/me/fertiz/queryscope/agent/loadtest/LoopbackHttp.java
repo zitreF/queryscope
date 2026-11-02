@@ -7,7 +7,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.Proxy;
-import java.net.URI;
 
 final class LoopbackHttp {
 
@@ -19,14 +18,24 @@ final class LoopbackHttp {
     private LoopbackHttp() {
     }
 
-    static int send(URI target, long run) throws IOException {
-        HttpURLConnection connection = (HttpURLConnection) target.toURL().openConnection(Proxy.NO_PROXY);
+    static int send(LoadTestPlan plan, long run) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) plan.target().toURL().openConnection(Proxy.NO_PROXY);
         connection.setConnectTimeout(CONNECT_TIMEOUT_MILLIS);
         connection.setReadTimeout(READ_TIMEOUT_MILLIS);
         connection.setInstanceFollowRedirects(false);
         connection.setUseCaches(false);
+        connection.setRequestMethod(plan.method());
         connection.setRequestProperty("User-Agent", "QueryScope load test");
+        plan.headers().forEach(connection::setRequestProperty);
         connection.setRequestProperty(UnitTracer.LOAD_TEST_HEADER, String.valueOf(run));
+        if (!plan.body().isEmpty()) {
+            byte[] body = plan.bodyBytes();
+            connection.setDoOutput(true);
+            connection.setFixedLengthStreamingMode(body.length);
+            try (OutputStream out = connection.getOutputStream()) {
+                out.write(body);
+            }
+        }
         int status = connection.getResponseCode();
         if (status < FIRST_VALID_STATUS) {
             connection.disconnect();

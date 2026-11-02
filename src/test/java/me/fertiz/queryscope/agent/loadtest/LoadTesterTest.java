@@ -190,7 +190,7 @@ class LoadTesterTest {
     }
 
     private static LoadTestPlan plan(int requests, int concurrency) {
-        return new LoadTestPlan("GET /books/{id}", TARGET, requests, concurrency);
+        return new LoadTestPlan("GET /books/{id}", TARGET, "GET", Map.of(), "", requests, concurrency);
     }
 
     private static UnitReport report(long run, int queries, boolean nPlusOne) {

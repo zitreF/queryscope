@@ -85,6 +85,9 @@ const PROFILE_REFRESH_MS = 5000;
 const TRACE_REFRESH_MS = 2000;
 const LOAD_TEST_REFRESH_MS = 1000;
 const LOAD_TEST_TARGETS = 50;
+const LOAD_TEST_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS'];
+const METHODS_WITH_BODY = ['POST', 'PUT'];
+const METHODS_THAT_CHANGE_DATA = ['POST', 'PUT', 'DELETE'];
 const UNTRACEABLE_PREFIXES = ['java.', 'jdk.', 'sun.', 'com.sun.', 'me.fertiz.queryscope.agent.', '('];
 const FLAME_ROW = 22;
 const FLAME_MAX_NODES = 8000;
@@ -144,6 +147,7 @@ const state = {
         requestId: null,
         path: null,
         selectedId: null,
+        prefilledFor: null,
     },
     windowMs: WINDOWS[0].ms,
     renderedRequestId: undefined,
@@ -207,7 +211,9 @@ byId('load-request').addEventListener('change', event => {
     const report = state.reports.find(candidate => candidate.id === Number(event.target.value));
     state.loadTest.requestId = report?.id ?? null;
     state.loadTest.path = report?.path ?? null;
+    prefillLoadRequest(report);
 });
+byId('load-method').addEventListener('change', updateLoadMethod);
 byId('profile-search').addEventListener('input', event => {
     state.profile.search = event.target.value.trim();
     renderFlame();
@@ -1381,7 +1387,7 @@ function createUnitLink(call) {
 }
 
 function canLoadTest(report) {
-    return !isTask(report) && report.method === 'GET' && report.port > 0;
+    return !isTask(report) && report.port > 0;
 }
 
 function createLoadTestButton(report) {
@@ -1403,14 +1409,43 @@ function openLoadTest(report) {
 }
 
 function loadTestTargets() {
-    const paths = new Set();
+    const requests = new Set();
     return state.reports.filter(report => {
-        if (!canLoadTest(report) || paths.has(report.path)) {
+        const request = `${report.method} ${report.path}`;
+        if (!canLoadTest(report) || requests.has(request)) {
             return false;
         }
-        paths.add(report.path);
+        requests.add(request);
         return true;
     }).slice(0, LOAD_TEST_TARGETS);
+}
+
+function prefillLoadRequest(report) {
+    if (!report || state.loadTest.prefilledFor === report.id) {
+        return;
+    }
+    state.loadTest.prefilledFor = report.id;
+    byId('load-method').value = LOAD_TEST_METHODS.includes(report.method) ? report.method : 'GET';
+    byId('load-path').value = report.path;
+    updateLoadMethod();
+}
+
+function updateLoadMethod() {
+    const method = byId('load-method').value;
+    byId('load-body-field').hidden = !METHODS_WITH_BODY.includes(method);
+    byId('load-warning').hidden = !METHODS_THAT_CHANGE_DATA.includes(method);
+}
+
+function parseLoadHeaders(text) {
+    const headers = {};
+    for (const line of text.split('\n').map(line => line.trim()).filter(line => line !== '')) {
+        const colon = line.indexOf(':');
+        if (colon <= 0) {
+            throw new Error(`Write each header as Name: value, not "${line}"`);
+        }
+        headers[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
+    }
+    return headers;
 }
 
 function renderLoadTargets() {
@@ -1429,9 +1464,10 @@ function renderLoadTargets() {
         ? targets.map(report => createElement('option', {value: report.id},
             `${report.method} ${report.path} · ${countWithNoun(report.view.queryCount, 'query', 'queries')}`
             + ` · ${formatMs(report.durationMs)}`))
-        : [createElement('option', {value: ''}, 'No GET request seen yet')]));
+        : [createElement('option', {value: ''}, 'No HTTP request seen yet')]));
     select.value = chosen ? String(chosen.id) : '';
     select.disabled = targets.length === 0;
+    prefillLoadRequest(chosen);
     updateLoadButtons();
 }
 
@@ -1448,6 +1484,7 @@ function isLoadTestRunning() {
 async function startLoadTest() {
     byId('load-error').textContent = '';
     try {
+        const method = byId('load-method').value;
         const response = await fetch('api/load-tests', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -1455,6 +1492,10 @@ async function startLoadTest() {
                 id: state.loadTest.requestId,
                 requests: Number(byId('load-requests').value),
                 concurrency: Number(byId('load-concurrency').value),
+                method,
+                path: byId('load-path').value.trim(),
+                headers: parseLoadHeaders(byId('load-headers').value),
+                body: METHODS_WITH_BODY.includes(method) ? byId('load-body').value : '',
             }),
         });
         const result = await response.json().catch(() => ({}));
@@ -1531,7 +1572,7 @@ function renderLoadTest() {
     if (!test) {
         byId('load-result').replaceChildren(createElement('section', {class: 'panel'},
             createElement('p', {class: 'empty', style: {paddingTop: '20px'}},
-                'No load test yet. Pick a GET request above, or press Load test in the details of one.')));
+                'No load test yet. Pick a request above, or press Load test in the details of one.')));
         return;
     }
     const done = test.answered + test.failed;
@@ -1539,11 +1580,11 @@ function renderLoadTest() {
         createElement('section', {class: 'panel'},
             createElement('div', {class: 'panel-header'},
                 createElement('div', {},
-                    createElement('h2', {}, createElement('span', {class: 'method'}, 'GET'),
+                    createElement('h2', {}, createElement('span', {class: 'method'}, test.method),
                         createElement('span', {class: 'load-path'}, loadTestPath(test))),
                     createElement('p', {class: 'panel-hint'}, `${formatCount(test.requests)} requests, `
                         + `${test.concurrency} at once, started ${new Date(parseInstant(test.startedAt)).toLocaleTimeString()}`
-                        + ` · ${test.endpoint}`)),
+                        + ` · ${test.endpoint}${loadTestExtras(test)}`)),
                 createElement('span', {class: `label load-${test.state}`}, loadTestStateText(test, done))),
             createElement('div', {class: 'progress'},
                 createElement('div', {class: 'progress-fill', style: {width: cssPercent(done / test.requests)}})),
@@ -1572,7 +1613,8 @@ function createLoadHistory(tests, shown) {
                     renderLoadTest();
                 },
             },
-            createElement('td', {class: 'ellipsis', title: test.target}, createElement('code', {}, loadTestPath(test))),
+            createElement('td', {class: 'ellipsis', title: test.target},
+                createElement('code', {}, `${test.method} ${loadTestPath(test)}`)),
             createElement('td', {}, new Date(parseInstant(test.startedAt)).toLocaleTimeString()),
             createElement('td', {class: 'number'}, test.state === 'finished'
                 ? `${formatCount(test.requests)}, ${test.concurrency} at once`
@@ -1593,6 +1635,17 @@ function createLoadHistory(tests, shown) {
             createElement('p', {class: 'panel-hint'},
                 `The last ${state.loadTest.data.kept} tests, newest first. Select one to see it above.`))),
         table);
+}
+
+function loadTestExtras(test) {
+    const extras = [];
+    if (test.headerNames.length > 0) {
+        extras.push(`with ${test.headerNames.join(', ')}`);
+    }
+    if (test.bodyBytes > 0) {
+        extras.push(`a body of ${formatCount(test.bodyBytes)} bytes`);
+    }
+    return extras.length === 0 ? '' : ` · ${extras.join(', ')}`;
 }
 
 function loadTestPath(test) {

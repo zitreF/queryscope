@@ -628,13 +628,53 @@ tbody tr.selected, tbody tr.selected:hover {
     font-size: 13px;
 }
 
-.load-form {
+.load-form .trace-form {
     flex-wrap: wrap;
 }
 
-.load-form .select {
+.load-form .load-target {
     width: 460px;
     max-width: 100%;
+}
+
+.load-form .load-method {
+    width: 110px;
+}
+
+.trace-form .load-path {
+    flex: 1;
+    min-width: 240px;
+    font-family: var(--mono);
+}
+
+.load-texts {
+    align-items: stretch;
+}
+
+.load-text-field {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 240px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.trace-form .load-text {
+    width: 100%;
+    height: auto;
+    min-height: 56px;
+    padding: 8px 10px;
+    font-family: var(--mono);
+    resize: vertical;
+}
+
+.load-warning {
+    margin: 0;
+    padding: 0 20px 16px;
+    color: var(--yellow);
+    font-size: 13px;
 }
 
 .load-field {

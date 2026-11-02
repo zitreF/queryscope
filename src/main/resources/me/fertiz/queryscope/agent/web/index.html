@@ -120,22 +120,48 @@
             <div class="panel-header">
                 <div>
                     <h2>Load test</h2>
-                    <p class="panel-hint">Sends a GET request your app already served again and again from inside its
-                        JVM, then shows how throughput, latency and queries hold up. These requests stay out of the
-                        request list.</p>
+                    <p class="panel-hint">Sends a request your app already served again and again from inside its JVM,
+                        then shows how throughput, latency and queries hold up. Change the method or path and add
+                        headers or a body if you need to. These requests stay out of the request list.</p>
                 </div>
             </div>
-            <form class="trace-form load-form" id="load-form">
-                <select class="select load-target" id="load-request" aria-label="Request to send again"></select>
-                <label class="load-field">Requests
-                    <input type="number" class="search" id="load-requests" min="1" max="10000" value="100">
-                </label>
-                <label class="load-field">At once
-                    <input type="number" class="search" id="load-concurrency" min="1" max="50" value="10">
-                </label>
-                <button type="submit" class="filled-button" id="load-start">Start</button>
-                <button type="button" class="text-button" id="load-stop" hidden>Stop</button>
-                <span class="trace-error" id="load-error" role="alert"></span>
+            <form class="load-form" id="load-form">
+                <div class="trace-form">
+                    <select class="select load-target" id="load-request" aria-label="Request to send again"></select>
+                    <label class="load-field">Requests
+                        <input type="number" class="search" id="load-requests" min="1" max="10000" value="100">
+                    </label>
+                    <label class="load-field">At once
+                        <input type="number" class="search" id="load-concurrency" min="1" max="50" value="10">
+                    </label>
+                    <button type="submit" class="filled-button" id="load-start">Start</button>
+                    <button type="button" class="text-button" id="load-stop" hidden>Stop</button>
+                    <span class="trace-error" id="load-error" role="alert"></span>
+                </div>
+                <div class="trace-form">
+                    <select class="select load-method" id="load-method" aria-label="Method">
+                        <option>GET</option>
+                        <option>POST</option>
+                        <option>PUT</option>
+                        <option>DELETE</option>
+                        <option>HEAD</option>
+                        <option>OPTIONS</option>
+                    </select>
+                    <input type="text" class="search load-path" id="load-path" aria-label="Path and query string"
+                           spellcheck="false" autocomplete="off">
+                </div>
+                <div class="trace-form load-texts">
+                    <label class="load-text-field">Headers, one per line
+                        <textarea class="search load-text" id="load-headers" rows="2" spellcheck="false"
+                                  placeholder="Authorization: Bearer …"></textarea>
+                    </label>
+                    <label class="load-text-field" id="load-body-field" hidden>Body
+                        <textarea class="search load-text" id="load-body" rows="2" spellcheck="false"
+                                  placeholder='{"title": "Dune"}'></textarea>
+                    </label>
+                </div>
+                <p class="load-warning" id="load-warning" hidden>POST, PUT and DELETE change data: every request of
+                    the test runs against your database like any other.</p>
             </form>
         </section>
         <div class="load-result" id="load-result"></div>

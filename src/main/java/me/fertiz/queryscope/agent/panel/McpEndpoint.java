@@ -40,7 +40,7 @@ final class McpEndpoint {
     private static final String INSTRUCTIONS = "QueryScope watches this Java application from inside its JVM: every "
             + "SQL query with its call site, the call tree of the application's methods, CPU samples and the methods "
             + "being traced. Start with get_report, open one request or task with get_request, use trace_method "
-            + "to time a method across all its calls while the application runs, and load_test to see how one GET "
+            + "to time a method across all its calls while the application runs, and load_test to see how one "
             + "endpoint holds up when it is called many times.";
     private static final List<Tool> TOOLS = List.of(
             new Tool("get_report", "QueryScope's report of the application in Markdown: findings such as N+1 queries "
@@ -63,11 +63,19 @@ final class McpEndpoint {
             new Tool("stop_trace", "Stops tracing a method and removes the recording.", List.of(
                     new Parameter("method", "string", "The traced method as list_traces names it, like "
                             + "com.acme.OrderService.findAll", true))),
-            new Tool("load_test", "Sends a GET request the application already served again many times from inside "
+            new Tool("load_test", "Sends a request the application already served again many times from inside "
                     + "its JVM and answers with the result as JSON: requests per second, latency percentiles, status "
                     + "codes and, from QueryScope's traces of those requests, queries per request, database time and "
-                    + "findings. Waits up to 30 s, a longer test keeps running and get_load_test shows it.", List.of(
-                    new Parameter("id", "integer", "The id of a GET request from list_requests", true),
+                    + "findings. Method and path can be changed and headers and a body added; POST, PUT and DELETE "
+                    + "change data like any other request. Waits up to 30 s, a longer test keeps running and "
+                    + "get_load_test shows it.", List.of(
+                    new Parameter("id", "integer", "The id of an HTTP request from list_requests, its port and "
+                            + "by default its method and path are used", true),
+                    new Parameter("method", "string", "GET, POST, PUT, DELETE, HEAD or OPTIONS", false),
+                    new Parameter("path", "string", "The path with its query string, starting with /", false),
+                    new Parameter("headers", "object", "Headers to send, like {\"Authorization\": \"Bearer ...\"}",
+                            false),
+                    new Parameter("body", "string", "A body for POST or PUT", false),
                     new Parameter("requests", "integer", "How many requests to send, "
                             + LoadTestRequest.DEFAULT_REQUESTS + " by default, at most " + LoadTestPlan.MAX_REQUESTS,
                             false),

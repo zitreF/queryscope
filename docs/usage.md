@@ -184,10 +184,16 @@ view.
 
 ### SQL → Load test
 
-A load test sends a GET request the app already served again and again and shows how the endpoint holds up. Pick
+A load test sends a request the app already served again and again and shows how the endpoint holds up. Pick
 the request in the view, or press **Load test** in the details of a request or a call tree, choose how many requests
 to send (up to 10,000) and how many at once (up to 50), and press **Start**. The numbers update every second, and
 **Stop** ends the test early.
+
+The method and path start as the request's own and can be changed. **Headers** take one `Name: value` per line, for
+example an `Authorization` header for an endpoint behind a login, and POST and PUT take a **Body** of up to 64 KB.
+QueryScope does not record the headers or body of the requests it traces, so a body has to be written in. The test
+shows the names of the headers it sent but never their values, and the AI report leaves out both. POST, PUT and
+DELETE change data like any other request, which is also what finds races that one request at a time never hits.
 
 - **The client side**: requests per second, the median, p95, p99 and slowest answer, and the status codes. Requests
   that got no answer are counted with the first error, such as `Connection refused`.
@@ -285,7 +291,7 @@ Any other client that speaks MCP over HTTP is set up with the same URL. The tool
 | `trace_method`  | starts tracing a method, named as `com.acme.OrderService#findAll`                      |
 | `list_traces`   | the traced methods with their percentiles, slowest and latest calls                    |
 | `stop_trace`    | stops tracing a method                                                                 |
-| `load_test`     | load tests a GET request by its id, waits up to 30 s and answers with the result       |
+| `load_test`     | load tests a request by its id, with another method, path, headers or body if given, waits up to 30 s and answers with the result |
 | `get_load_test` | the latest load test, finished or still running                                        |
 
 Like the rest of the panel, `/mcp` answers on localhost only and takes no requests from other web pages.
@@ -422,7 +428,7 @@ The panel is backed by a small JSON API on the same port:
 | `POST /api/traces`             | starts tracing the method in a body like `{"method": "com.acme.OrderService#findAll"}` |
 | `DELETE /api/traces/{method}`  | stops tracing it, named as `com.acme.OrderService.findAll`                            |
 | `GET /api/load-tests`          | the last 10 load tests, newest first, with the limits on requests and concurrency     |
-| `POST /api/load-tests`         | starts a load test with a body like `{"id": 17, "requests": 100, "concurrency": 10}`  |
+| `POST /api/load-tests`         | starts a load test with a body like `{"id": 17, "requests": 100, "concurrency": 10}`, and optionally `method`, `path`, `headers` as an object and `body` |
 | `DELETE /api/load-tests`       | stops the running load test                                                           |
 | `GET /api/report.md`           | the report for AI assistants in Markdown                                              |
 | `POST /mcp`                    | the MCP server, see [With an AI assistant](#with-an-ai-assistant)                     |
@@ -515,8 +521,8 @@ production.
 - Flight Recorder samples only threads running Java code, skips threads inside some JVM stubs such as array copies,
   and does not sample threads that sleep or wait on a lock.
 - An attached agent cannot be unloaded, and requests already running when it attaches are not recorded.
-- A load test sends plain HTTP GET requests to `127.0.0.1` on the port the request came in on, without the original
-  headers or cookies. An endpoint behind a login answers with its login response, and an app that serves only HTTPS
-  or listens on another address cannot be load tested.
+- A load test sends plain HTTP to `127.0.0.1` on the port the request came in on, with only the headers written into
+  the form, so a login has to be passed as a header. An app that serves only HTTPS or listens on another address
+  cannot be load tested, and `PATCH` is not supported.
 - The load comes from inside the application's JVM, so the test and the app share the CPU. Compare endpoints and
   before and after a fix with it; it does not measure how much traffic a production server can take.

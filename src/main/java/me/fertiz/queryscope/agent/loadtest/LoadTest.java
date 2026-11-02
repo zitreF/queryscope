@@ -69,7 +69,7 @@ final class LoadTest {
         while (!stopRequested && claimed.getAndIncrement() < plan.requests()) {
             long started = System.nanoTime();
             try {
-                int status = sender.send(plan.target(), id);
+                int status = sender.send(plan, id);
                 answered(status, System.nanoTime() - started);
             } catch (IOException | RuntimeException e) {
                 failed(e);

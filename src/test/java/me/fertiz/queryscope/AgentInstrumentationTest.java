@@ -494,7 +494,8 @@ class AgentInstrumentationTest {
         try {
             LoadTester tester = new LoadTester();
             long run = tester.start(new LoadTestPlan("GET /shelf",
-                    URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/shelf"), 6, 3)).id();
+                    URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/shelf"), "GET", Map.of(), "", 6,
+                    3)).id();
 
             assertEquals(6, tester.awaitLatest(Duration.ofSeconds(10)).orElseThrow().answered());
             List<UnitTrace> shelf = awaitTraces("/shelf", 6);

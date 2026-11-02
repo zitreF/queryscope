@@ -41,8 +41,9 @@ prints a summary of the session. The [usage guide](docs/usage.md) has the detail
   the JDK, as a flame graph for the whole app, one thread, one request or one endpoint.
 - **Method tracing on demand**: pick any method of your code or a library while the app runs and see every call, its
   percentiles and the requests behind its slowest calls.
-- **Load tests**: send a GET request the app already served hundreds or thousands of times and see requests per
-  second and latency percentiles next to the queries per request and findings QueryScope saw inside the app.
+- **Load tests**: send a request the app already served hundreds or thousands of times, with any method, headers
+  and body, and see requests per second and latency percentiles next to the queries per request and findings
+  QueryScope saw inside the app.
 - **Help for your AI assistant**: **Copy for AI** puts a Markdown report of everything above on the clipboard, and
   the panel is an MCP server, so Claude Code and other assistants can read findings and requests, trace methods and
   run load tests themselves.
@@ -80,7 +81,9 @@ A scheduled job builds the same naive summaries every 30 seconds outside any HTT
 `DigestJob.prepareDigest`, and the data loaded at startup shows up as `DemoApplication.main`.
 
 Then press **Load test** on `/api/customers/naive` and on `/api/customers/optimized`: the optimized endpoint answers
-several times more requests per second, with 1 query per request instead of 41.
+several times more requests per second, with 1 query per request instead of 41. A load test of
+`POST /api/reports/visits` with 5 requests at once shows the bug no single request does: some answer 500, because
+the service picks its next id with `select max(id) + 1` and parallel requests pick the same one.
 
 ## Example: finding and fixing an N+1
 

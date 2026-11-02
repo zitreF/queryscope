@@ -32,6 +32,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -176,12 +177,42 @@ class PanelServerTest {
             String test = awaitLoadTest();
 
             assertEquals(200, started.statusCode(), started.body());
-            assertTrue(started.body().startsWith("{\"id\":1,\"endpoint\":\"GET /books\",\"target\":\"http://127.0.0.1:"),
-                    started.body());
+            assertTrue(started.body().startsWith("{\"id\":1,\"endpoint\":\"GET /books\",\"method\":\"GET\","
+                    + "\"target\":\"http://127.0.0.1:"), started.body());
             assertTrue(test.contains("\"answered\":20,\"failed\":0,\"firstError\":null"), test);
             assertTrue(test.contains("\"statuses\":[{\"status\":204,\"count\":20}]"), test);
             assertEquals(Set.of("/books?page=2 run 1"), runs);
             assertEquals(404, delete("/api/load-tests").statusCode());
+        } finally {
+            application.stop(0);
+        }
+    }
+
+    @Test
+    void loadTestsWithAnotherMethodHeadersAndABody() throws Exception {
+        Set<String> received = ConcurrentHashMap.newKeySet();
+        HttpServer application = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        application.createContext("/books", exchange -> {
+            received.add(exchange.getRequestMethod() + " " + exchange.getRequestURI() + " "
+                    + exchange.getRequestHeaders().getFirst("Authorization") + " "
+                    + new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            HttpSupport.sendStatus(exchange, 201);
+        });
+        application.start();
+        try {
+            store.add(Reports.servedOnPort(3, "/books/7", application.getAddress().getPort()));
+
+            HttpResponse<String> started = postJson("/api/load-tests", "{\"id\": 3, \"requests\": 5, "
+                    + "\"concurrency\": 1, \"method\": \"POST\", \"path\": \"/books?draft=1\", "
+                    + "\"headers\": {\"Authorization\": \"Bearer abc\"}, \"body\": \"{\\\"title\\\": 1}\"}", null);
+            String test = awaitLoadTest();
+
+            assertEquals(200, started.statusCode(), started.body());
+            assertTrue(test.contains("\"endpoint\":\"POST /books\",\"method\":\"POST\""), test);
+            assertTrue(test.contains("\"headerNames\":[\"Authorization\"],\"bodyBytes\":12"), test);
+            assertFalse(test.contains("Bearer abc"), test);
+            assertTrue(test.contains("\"statuses\":[{\"status\":201,\"count\":5}]"), test);
+            assertEquals(Set.of("POST /books?draft=1 Bearer abc {\"title\": 1}"), received);
         } finally {
             application.stop(0);
         }
