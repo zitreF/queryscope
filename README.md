@@ -35,8 +35,8 @@ prints a summary of the session. The [usage guide](docs/usage.md) has the detail
 - **Slow code**: methods that spend their time in Java rather than in the database, with warm-up left out.
 - **A call tree of your methods** for every request and task, with the queries each method ran, so an N+1 points at
   the method that loops.
-- **Async work in its request**: queries of `@Async` methods, `CompletableFuture`s, executor tasks and parallel
-  streams count in the request that started them, so an N+1 spread over a thread pool is still one N+1.
+- **Async work in its request**: queries of `@Async` methods, `CompletableFuture`s, executor tasks, virtual threads
+  and parallel streams count in the request that started them, so an N+1 spread over a thread pool is still one N+1.
 - **A sampling profiler** on JDK Flight Recorder that sees every method of any Java program, your code, libraries and
   the JDK, as a flame graph for the whole app, one thread, one request or one endpoint.
 - **Method tracing on demand**: pick any method of your code or a library while the app runs and see every call, its

@@ -499,8 +499,8 @@ production.
 ## Limitations
 
 - Async tasks are followed through `ThreadPoolExecutor`, `ForkJoinPool` (with `CompletableFuture` and parallel
-  streams) and everything built on them, such as Spring's `@Async` and `ThreadPoolTaskExecutor`. Work handed to a new
-  `Thread`, a virtual thread or a `ScheduledExecutorService` shows up as separate tasks. A request waits at most a
+  streams), virtual threads and thread-per-task executors, and everything built on them, such as Spring's `@Async`.
+  Work handed to a new platform `Thread` or a `ScheduledExecutorService` shows up as separate tasks. A request waits at most a
   second for its async tasks after it returns; a task that runs longer, such as one finishing a `DeferredResult`,
   shows up on its own as `Async from GET /path`.
 - Reactive stacks are not covered: WebFlux and Vert.x requests are not recognized, and R2DBC is not JDBC.

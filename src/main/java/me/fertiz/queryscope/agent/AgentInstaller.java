@@ -10,6 +10,7 @@ import me.fertiz.queryscope.agent.trace.AsyncForkAdvice;
 import me.fertiz.queryscope.agent.trace.AsyncRunAdvice;
 import me.fertiz.queryscope.agent.trace.AsyncSubmitAdvice;
 import me.fertiz.queryscope.agent.trace.AsyncTasks;
+import me.fertiz.queryscope.agent.trace.AsyncThreadAdvice;
 import me.fertiz.queryscope.agent.trace.ClearParametersAdvice;
 import me.fertiz.queryscope.agent.trace.ConnectionReleaseAdvice;
 import me.fertiz.queryscope.agent.trace.EntryAdvice;
@@ -131,6 +132,12 @@ public final class AgentInstaller {
                 new Hook(named(CONCURRENT + "ThreadPoolExecutor"),
                         named("execute").and(takesArguments(Runnable.class)),
                         AsyncSubmitAdvice.class),
+                new Hook(named(CONCURRENT + "ThreadPerTaskExecutor"),
+                        named("start").and(takesArguments(Runnable.class)),
+                        AsyncSubmitAdvice.class),
+                new Hook(named("java.lang.ThreadBuilders"),
+                        named("newVirtualThread").and(takesArguments(4)).and(takesArgument(3, Runnable.class)),
+                        AsyncThreadAdvice.class),
                 new Hook(named(CONCURRENT + "ForkJoinPool"),
                         namedOneOf("execute", "submit", "invoke").and(takesArguments(1)).and(not(isBridge())),
                         AsyncSubmitAdvice.class),

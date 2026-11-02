@@ -255,6 +255,21 @@ class AgentInstrumentationTest {
     }
 
     @Test
+    void countsTheQueriesOfVirtualThreads() throws Exception {
+        handle(request(DispatcherType.REQUEST, "/books"), () -> {
+            try (ExecutorService virtual = Executors.newVirtualThreadPerTaskExecutor()) {
+                virtual.submit(AgentInstrumentationTest::findTitleQuietly).get();
+                virtual.execute(AgentInstrumentationTest::findTitleQuietly);
+            }
+            Thread.ofVirtual().start(AgentInstrumentationTest::findTitleQuietly).join();
+        });
+
+        UnitTrace trace = awaitSingleTrace();
+        assertEquals(UnitKind.HTTP, trace.kind());
+        assertEquals(3, trace.queries().size());
+    }
+
+    @Test
     void countsATaskSubmittedTwiceOnlyOnce() throws Exception {
         ExecutorService pool = Executors.newSingleThreadExecutor();
         FutureTask<String> lookup = new FutureTask<>(AgentInstrumentationTest::findTitleQuietly);

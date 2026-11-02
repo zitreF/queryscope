@@ -99,6 +99,8 @@ matcher and an advice class:
 | classes of your packages                         | every method except constructors, bridges, synthetic and native ones | `MethodAdvice` |
 | the JDK's `com.sun.net.httpserver.Filter$Chain`  | `doFilter(exchange)`                                | `JdkHttpServerAdvice`   |
 | `ThreadPoolExecutor`, `ForkJoinPool`             | `execute`, `submit`, `invoke`                       | `AsyncSubmitAdvice`     |
+| `ThreadPerTaskExecutor`                          | `start(Runnable)`                                   | `AsyncSubmitAdvice`     |
+| `ThreadBuilders`, behind every virtual thread    | `newVirtualThread(..., Runnable)`                   | `AsyncThreadAdvice`     |
 | `ForkJoinTask`                                   | `fork()`                                            | `AsyncForkAdvice`       |
 | `FutureTask`, `ForkJoinTask`, the tasks of `CompletableFuture` | `run()`, `doExec()`                    | `AsyncRunAdvice`        |
 
@@ -145,9 +147,9 @@ The choices behind it:
 - **Entry tasks** start and end with a method named by `entry=`, so a whole job is one unit however many connections
   it opens.
 - **Async tasks** belong to the request or task that submitted them. When a task is handed to a `ThreadPoolExecutor`
-  or `ForkJoinPool`, or forked as a `ForkJoinTask`, from a thread inside a unit, the task object is remembered with
-  that unit and the unit counts it as running. `FutureTask`s and `ForkJoinTask`s keep their identity; a plain
-  `Runnable` or `Callable` is wrapped in a small tracked one. When the task starts on a pool thread, that thread gets
+  or `ForkJoinPool`, forked as a `ForkJoinTask`, or given to a new virtual thread, from a thread inside a unit, the task
+  object is remembered with that unit and the unit counts it as running. `FutureTask`s and `ForkJoinTask`s keep their
+  identity; a plain `Runnable` or `Callable` is wrapped in a small tracked one. When the task starts on a pool thread, that thread gets
   an async unit of its own, and when the task ends, its queries and call tree are handed to the owner. A task that
   runs on the owner's own thread, as when a pool runs it on the caller or a thread helps with a `join`, records into
   the owner directly. The queries keep their time relative to the owner's start, after the owner's own queries, and
