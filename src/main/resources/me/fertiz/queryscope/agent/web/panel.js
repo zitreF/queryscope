@@ -71,6 +71,7 @@ const FINDING_TYPES = {
 const VIEWS = {
     'sql/live': 'view-live',
     'sql/requests': 'view-requests',
+    'sql/load-test': 'view-load-test',
     'java/profile': 'view-profile',
     'java/calls': 'view-calls',
     'java/traces': 'view-traces',
@@ -82,6 +83,8 @@ const PROFILE_WINDOWS = [
 ];
 const PROFILE_REFRESH_MS = 5000;
 const TRACE_REFRESH_MS = 2000;
+const LOAD_TEST_REFRESH_MS = 1000;
+const LOAD_TEST_TARGETS = 50;
 const UNTRACEABLE_PREFIXES = ['java.', 'jdk.', 'sun.', 'com.sun.', 'me.fertiz.queryscope.agent.', '('];
 const FLAME_ROW = 22;
 const FLAME_MAX_NODES = 8000;
@@ -133,6 +136,13 @@ const state = {
         inFlight: null,
         loadedAt: 0,
         selected: null,
+    },
+    loadTest: {
+        data: null,
+        inFlight: null,
+        loadedAt: 0,
+        requestId: null,
+        path: null,
     },
     windowMs: WINDOWS[0].ms,
     renderedRequestId: undefined,
@@ -187,6 +197,16 @@ byId('trace-form').addEventListener('submit', event => {
     event.preventDefault();
     startTrace(byId('trace-method').value);
 });
+byId('load-form').addEventListener('submit', event => {
+    event.preventDefault();
+    startLoadTest();
+});
+byId('load-stop').addEventListener('click', stopLoadTest);
+byId('load-request').addEventListener('change', event => {
+    const report = state.reports.find(candidate => candidate.id === Number(event.target.value));
+    state.loadTest.requestId = report?.id ?? null;
+    state.loadTest.path = report?.path ?? null;
+});
 byId('profile-search').addEventListener('input', event => {
     state.profile.search = event.target.value.trim();
     renderFlame();
@@ -225,6 +245,7 @@ selectView(viewFromHash());
 renderAll();
 connectToEventStream();
 loadTraces();
+loadLoadTest();
 setInterval(onEverySecond, 1000);
 requestAnimationFrame(animateLiveStream);
 
@@ -444,6 +465,10 @@ function selectView(view) {
     if (view === 'java/traces') {
         loadTraces();
     }
+    if (view === 'sql/load-test') {
+        renderLoadTargets();
+        loadLoadTest();
+    }
 }
 
 function openRequest(id) {
@@ -490,6 +515,9 @@ function renderAll() {
     renderFeed();
     renderRequestList();
     renderCallTreeList();
+    if (state.view === 'sql/load-test') {
+        renderLoadTargets();
+    }
 }
 
 function onEverySecond() {
@@ -501,6 +529,10 @@ function onEverySecond() {
     if (state.view === 'java/traces' && !state.paused && state.traces.inFlight === null
         && Date.now() - state.traces.loadedAt >= TRACE_REFRESH_MS) {
         loadTraces();
+    }
+    if (isLoadTestRunning() && state.loadTest.inFlight === null
+        && Date.now() - state.loadTest.loadedAt >= LOAD_TEST_REFRESH_MS) {
+        loadLoadTest();
     }
     const current = displayTime();
     for (const {node, end} of state.feedAgeCells) {
@@ -1347,6 +1379,255 @@ function createUnitLink(call) {
     }, call.unit);
 }
 
+function canLoadTest(report) {
+    return !isTask(report) && report.method === 'GET' && report.port > 0;
+}
+
+function createLoadTestButton(report) {
+    return canLoadTest(report)
+        ? createElement('button', {
+            type: 'button',
+            class: 'text-button',
+            title: 'Send this request again many times and see how it holds up',
+            onclick: () => openLoadTest(report),
+        }, 'Load test')
+        : null;
+}
+
+function openLoadTest(report) {
+    state.loadTest.requestId = report.id;
+    state.loadTest.path = report.path;
+    byId('load-error').textContent = '';
+    selectView('sql/load-test');
+}
+
+function loadTestTargets() {
+    const paths = new Set();
+    return state.reports.filter(report => {
+        if (!canLoadTest(report) || paths.has(report.path)) {
+            return false;
+        }
+        paths.add(report.path);
+        return true;
+    }).slice(0, LOAD_TEST_TARGETS);
+}
+
+function renderLoadTargets() {
+    const select = byId('load-request');
+    if (document.activeElement === select) {
+        return;
+    }
+    const targets = loadTestTargets();
+    const loadTest = state.loadTest;
+    const chosen = targets.find(report => report.id === loadTest.requestId)
+        ?? targets.find(report => report.path === loadTest.path)
+        ?? targets[0];
+    loadTest.requestId = chosen?.id ?? null;
+    loadTest.path = chosen?.path ?? null;
+    select.replaceChildren(...(targets.length > 0
+        ? targets.map(report => createElement('option', {value: report.id},
+            `${report.method} ${report.path} · ${countWithNoun(report.view.queryCount, 'query', 'queries')}`
+            + ` · ${formatMs(report.durationMs)}`))
+        : [createElement('option', {value: ''}, 'No GET request seen yet')]));
+    select.value = chosen ? String(chosen.id) : '';
+    select.disabled = targets.length === 0;
+    updateLoadButtons();
+}
+
+function updateLoadButtons() {
+    const running = isLoadTestRunning();
+    byId('load-start').disabled = running || state.loadTest.requestId === null;
+    byId('load-stop').hidden = !running;
+}
+
+function isLoadTestRunning() {
+    return state.loadTest.data?.test?.state === 'running';
+}
+
+async function startLoadTest() {
+    byId('load-error').textContent = '';
+    try {
+        const response = await fetch('api/load-tests', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                id: state.loadTest.requestId,
+                requests: Number(byId('load-requests').value),
+                concurrency: Number(byId('load-concurrency').value),
+            }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(result.error || `the panel answered ${response.status}`);
+        }
+        state.loadTest.data = {...state.loadTest.data, test: result};
+        state.loadTest.loadedAt = Date.now();
+        renderLoadTest();
+    } catch (error) {
+        byId('load-error').textContent = error.message;
+    }
+}
+
+async function stopLoadTest() {
+    try {
+        const response = await fetch('api/load-tests', {method: 'DELETE'});
+        if (!response.ok && response.status !== 404) {
+            throw new Error(`the panel answered ${response.status}`);
+        }
+    } catch (error) {
+        byId('load-error').textContent = `Could not stop the load test: ${error.message}`;
+    }
+    loadLoadTest();
+}
+
+async function loadLoadTest() {
+    const loadTest = state.loadTest;
+    loadTest.inFlight?.abort();
+    const request = loadTest.inFlight = new AbortController();
+    let data;
+    try {
+        const response = await fetch('api/load-tests', {signal: request.signal});
+        data = response.ok ? await response.json() : null;
+    } catch (error) {
+        data = null;
+    }
+    if (request.signal.aborted) {
+        return;
+    }
+    loadTest.inFlight = null;
+    loadTest.loadedAt = Date.now();
+    if (data === null) {
+        return;
+    }
+    const previous = loadTest.data?.test;
+    loadTest.data = data;
+    if (previous?.state === 'running' && data.test?.id === previous.id && data.test.state !== 'running') {
+        announceLoadTest(data.test);
+    }
+    renderLoadTest();
+}
+
+function announceLoadTest(test) {
+    if (state.view === 'sql/load-test') {
+        return;
+    }
+    byId('snackbar-action').onclick = () => {
+        byId('snackbar').hidden = true;
+        selectView('sql/load-test');
+    };
+    byId('snackbar-action').hidden = false;
+    showSnackbar(`Load test of ${test.endpoint} ${test.state}: ${formatRate(test.requestsPerSecond)} per second, `
+        + `p95 ${formatMs(test.latency.p95Ms)}`, SNACK_MS);
+}
+
+function renderLoadTest() {
+    updateLoadButtons();
+    const test = state.loadTest.data?.test;
+    if (!test) {
+        byId('load-result').replaceChildren(createElement('section', {class: 'panel'},
+            createElement('p', {class: 'empty', style: {paddingTop: '20px'}},
+                'No load test yet. Pick a GET request above, or press Load test in the details of one.')));
+        return;
+    }
+    const target = new URL(test.target);
+    const done = test.answered + test.failed;
+    byId('load-result').replaceChildren(
+        createElement('section', {class: 'panel'},
+            createElement('div', {class: 'panel-header'},
+                createElement('div', {},
+                    createElement('h2', {}, createElement('span', {class: 'method'}, 'GET'),
+                        createElement('span', {class: 'load-path'}, target.pathname + target.search)),
+                    createElement('p', {class: 'panel-hint'}, `${formatCount(test.requests)} requests, `
+                        + `${test.concurrency} at once, started ${new Date(parseInstant(test.startedAt)).toLocaleTimeString()}`
+                        + ` · ${test.endpoint}`)),
+                createElement('span', {class: `label load-${test.state}`}, loadTestStateText(test, done))),
+            createElement('div', {class: 'progress'},
+                createElement('div', {class: 'progress-fill', style: {width: cssPercent(done / test.requests)}})),
+            createElement('p', {class: 'load-statuses'}, createLoadStatusLine(test))),
+        createLoadKpis(test),
+        createLoadServerPanel(test));
+}
+
+function loadTestStateText(test, done) {
+    if (test.state === 'running') {
+        return `Running · ${formatCount(done)} of ${formatCount(test.requests)}`;
+    }
+    return test.state === 'stopped' ? `Stopped after ${formatCount(done)}` : 'Finished';
+}
+
+function createLoadStatusLine(test) {
+    const parts = test.statuses.map(entry => createElement('span', {class: entry.status >= 400 ? 'status-error' : ''},
+        `${entry.status} × ${formatCount(entry.count)}`));
+    if (test.failed > 0) {
+        parts.push(createElement('span', {class: 'status-error'},
+            `${formatCount(test.failed)} got no answer: ${test.firstError}`));
+    }
+    if (parts.length === 0) {
+        return 'No answers yet.';
+    }
+    return ['Answers: ', parts.flatMap((part, index) => index === 0 ? [part] : [' · ', part])];
+}
+
+function createLoadKpis(test) {
+    const latency = test.latency;
+    const answered = test.answered > 0;
+    const kpis = [
+        {label: 'Requests per second', value: answered ? formatRate(test.requestsPerSecond) : '—',
+            sub: `${formatCount(test.answered)} answered in ${formatMs(test.elapsedMs)}`},
+        {label: 'Median', value: answered ? formatMs(latency.p50Ms) : '—', sub: 'Half of the requests were faster'},
+        {label: 'p95', value: answered ? formatMs(latency.p95Ms) : '—', sub: '95% of the requests were faster'},
+        {label: 'p99', value: answered ? formatMs(latency.p99Ms) : '—', sub: '99% of the requests were faster'},
+        {label: 'Slowest', value: answered ? formatMs(latency.maxMs) : '—',
+            sub: answered ? `Average ${formatMs(latency.averageMs)}` : 'No answers yet'},
+    ];
+    return createElement('div', {class: 'stats'}, kpis.map(kpi => createElement('div', {class: 'stat'},
+        createElement('div', {class: 'stat-label'}, kpi.label),
+        createElement('div', {class: 'stat-value'}, kpi.value),
+        createElement('div', {class: 'stat-sub'}, kpi.sub))));
+}
+
+function createLoadServerPanel(test) {
+    const server = test.server;
+    const traced = server.tracedRequests;
+    const header = createElement('div', {class: 'panel-header'}, createElement('div', {},
+        createElement('h2', {}, 'On the server'),
+        createElement('p', {class: 'panel-hint'}, traced > 0
+            ? `From QueryScope's traces of ${formatCount(traced)} of these requests inside the app`
+            : 'QueryScope has not seen any of these requests inside the app yet.')));
+    if (traced === 0) {
+        return createElement('section', {class: 'panel'}, header);
+    }
+    const queries = server.fewestQueries === server.mostQueries
+        ? formatCount(server.fewestQueries)
+        : `${formatCount(server.fewestQueries)} to ${formatCount(server.mostQueries)}`;
+    return createElement('section', {class: 'panel'},
+        header,
+        createElement('div', {class: 'load-facts'}, createElement('dl', {class: 'facts'},
+            createFact('Queries per request', queries),
+            createFact('Time in database', `${formatMs(server.averageDatabaseMs)} on average`),
+            createFact('Median in the app', formatMs(server.latency.p50Ms)),
+            createFact('p95 in the app', formatMs(server.latency.p95Ms)),
+            createFact('Slowest in the app', formatMs(server.latency.maxMs)))),
+        server.fewestQueries === server.mostQueries ? null : createElement('p', {class: 'load-note'},
+            'The number of queries changes from request to request, so some of them depend on the data.'),
+        createElement('div', {class: 'load-findings'}, server.findings.length === 0
+            ? createElement('div', {class: 'finding clean'}, 'No findings in these requests.')
+            : server.findings.map(finding => createLoadFinding(finding, traced))));
+}
+
+function createLoadFinding(finding, traced) {
+    const type = FINDING_TYPES[finding.type];
+    return createElement('div', {class: `finding ${type?.css ?? ''}`},
+        createElement('div', {class: 'load-finding-line'},
+            createElement('span', {class: `label ${type?.css ?? ''}`}, type?.name ?? finding.type),
+            `In ${formatCount(finding.requests)} of ${formatCount(traced)} requests, for example:`),
+        createElement('code', {class: 'load-finding-example'}, finding.example));
+}
+
+function formatRate(perSecond) {
+    return perSecond >= 100 ? formatCount(Math.round(perSecond)) : perSecond.toFixed(1);
+}
+
 function createTable(columns, rows) {
     return createElement('table', {},
         createElement('colgroup', {}, columns.map(column => createElement('col', {style: {width: column.width}}))),
@@ -1418,11 +1699,13 @@ function renderRequestDetails(report) {
         createElement('div', {class: 'panel details-header'},
             createElement('div', {class: 'details-title'},
                 createElement('h1', {}, createElement('span', {class: 'method'}, report.method), report.path),
-                report.methodCount > 0
-                    ? createElement('button',
-                        {type: 'button', class: 'text-button', onclick: () => openCalls(report.id)},
-                        'Call tree')
-                    : null),
+                createElement('div', {class: 'details-actions'},
+                    createLoadTestButton(report),
+                    report.methodCount > 0
+                        ? createElement('button',
+                            {type: 'button', class: 'text-button', onclick: () => openCalls(report.id)},
+                            'Call tree')
+                        : null)),
             createElement('dl', {class: 'facts'},
                 isTask(report) ? createFact('Kind', 'Task outside HTTP') : createFact('Status', String(report.status)),
                 createFact('Duration', formatMs(report.durationMs)),
@@ -1490,6 +1773,7 @@ function renderCallTreeDetails(report) {
             createElement('div', {class: 'details-title'},
                 createElement('h1', {}, createElement('span', {class: 'method'}, report.method), report.path),
                 createElement('div', {class: 'details-actions'},
+                    createLoadTestButton(report),
                     createElement('button', {type: 'button', class: 'text-button', onclick: () => openProfile(report)},
                         'CPU samples'),
                     report.view.hasSql

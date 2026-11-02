@@ -24,7 +24,7 @@ class ReportJsonTest {
     @Test
     void writesRequestQueriesAndFindings() {
         String expected = "{\"id\":7,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/customers?q=\\\"x\\\"\",\"status\":500,"
-                + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":125.000,\"queries\":["
+                + "\"port\":0,\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":125.000,\"queries\":["
                 + "{\"sql\":\"select * from orders where customer_id = 1\",\"parameters\":\"\",\"offsetMs\":1.000,"
                 + "\"durationMs\":0.500,\"rows\":3,\"callSite\":\"com.acme.Mapper.toDto(Mapper.java:7)\",\"failed\":false},"
                 + "{\"sql\":\"select * from orders where customer_id = 2\",\"parameters\":\"\",\"offsetMs\":2.000,"
@@ -44,11 +44,11 @@ class ReportJsonTest {
     void writesListsAndNullCallSites() {
         String json = ReportJson.reportsToJson(List.of(Reports.plain(2, "/b"), Reports.plain(1, "/a")));
 
-        assertEquals("[{\"id\":2,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/b\",\"status\":200,"
+        assertEquals("[{\"id\":2,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/b\",\"status\":200,\"port\":0,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":2.000,\"queries\":[{\"sql\":\"select 1\","
                 + "\"parameters\":\"\",\"offsetMs\":0.500,\"durationMs\":0.250,\"rows\":1,\"callSite\":null,\"failed\":false}],"
                 + "\"omittedQueries\":0,\"omittedMs\":0.000,\"findings\":[],\"methodCount\":0},"
-                + "{\"id\":1,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/a\",\"status\":200,"
+                + "{\"id\":1,\"kind\":\"http\",\"method\":\"GET\",\"path\":\"/a\",\"status\":200,\"port\":0,"
                 + "\"startedAt\":\"2026-10-25T20:00:00Z\",\"durationMs\":2.000,\"queries\":[{\"sql\":\"select 1\","
                 + "\"parameters\":\"\",\"offsetMs\":0.500,\"durationMs\":0.250,\"rows\":1,\"callSite\":null,\"failed\":false}],"
                 + "\"omittedQueries\":0,\"omittedMs\":0.000,\"findings\":[],\"methodCount\":0}]", json);
@@ -83,7 +83,7 @@ class ReportJsonTest {
     @Test
     void writesHowManyQueriesWereLeftOut() {
         UnitTrace trace = new UnitTrace(5, UnitKind.TASK, "TASK", "ImportJob.run", 0, Reports.STARTED_AT,
-                9_000_000, List.of(), CallTree.EMPTY, 0, 1, 500, 2_500_000);
+                9_000_000, List.of(), CallTree.EMPTY, 0, 1, 500, 2_500_000, 0, 0);
 
         String json = ReportJson.reportToJson(new UnitReport(trace, List.of()));
 
@@ -95,7 +95,7 @@ class ReportJsonTest {
         CallNode toDto = new CallNode("com.acme.Mapper.toDto", 2, 600_000, 600_000, false, List.of(0, 1), List.of());
         CallNode list = new CallNode("com.acme.Service.list", 1, 1_000_000, 400_000, true, List.of(), List.of(toDto));
         UnitTrace trace = new UnitTrace(4, UnitKind.HTTP, "GET", "/orders", 200, Reports.STARTED_AT, 2_000_000,
-                List.of(), new CallTree(List.of(list), List.of(2), false), 3, 1, 0, 0);
+                List.of(), new CallTree(List.of(list), List.of(2), false), 3, 1, 0, 0, 0, 0);
 
         String json = ReportJson.callTreeToJson(new UnitReport(trace, List.of()), List.of("com.acme"));
 

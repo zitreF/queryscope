@@ -19,7 +19,9 @@ public record UnitTrace(
         long classesLoaded,
         long threadId,
         int omittedQueries,
-        long omittedNanos
+        long omittedNanos,
+        int localPort,
+        long loadTestRun
 ) {
 
     public static final int WARM_UP_CLASSES = 50;
@@ -30,7 +32,7 @@ public record UnitTrace(
 
     public UnitTrace(long id, UnitKind kind, String method, String path, int status, Instant startedAt,
                         long durationNanos, List<QueryExecution> queries) {
-        this(id, kind, method, path, status, startedAt, durationNanos, queries, CallTree.EMPTY, 0, 0, 0, 0);
+        this(id, kind, method, path, status, startedAt, durationNanos, queries, CallTree.EMPTY, 0, 0, 0, 0, 0, 0);
     }
 
     public boolean isWarmUp() {

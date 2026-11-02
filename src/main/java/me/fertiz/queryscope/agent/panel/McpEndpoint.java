@@ -6,9 +6,13 @@ import me.fertiz.queryscope.agent.console.AiReport;
 import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.http.JsonReader;
 import me.fertiz.queryscope.agent.http.JsonWriter;
+import me.fertiz.queryscope.agent.loadtest.LoadTestPlan;
+import me.fertiz.queryscope.agent.loadtest.LoadTestResult;
+import me.fertiz.queryscope.agent.loadtest.LoadTester;
 import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,10 +36,12 @@ final class McpEndpoint {
     private static final int INVALID_PARAMS = -32602;
     private static final int DEFAULT_REQUESTS = 20;
     private static final int MAX_REQUESTS = 200;
+    private static final Duration LOAD_TEST_WAIT = Duration.ofSeconds(30);
     private static final String INSTRUCTIONS = "QueryScope watches this Java application from inside its JVM: every "
             + "SQL query with its call site, the call tree of the application's methods, CPU samples and the methods "
-            + "being traced. Start with get_report, open one request or task with get_request, and use trace_method "
-            + "to time a method across all its calls while the application runs.";
+            + "being traced. Start with get_report, open one request or task with get_request, use trace_method "
+            + "to time a method across all its calls while the application runs, and load_test to see how one GET "
+            + "endpoint holds up when it is called many times.";
     private static final List<Tool> TOOLS = List.of(
             new Tool("get_report", "QueryScope's report of the application in Markdown: findings such as N+1 queries "
                     + "with their SQL, call site and where they were seen, endpoints by time in the database, hot "
@@ -56,17 +62,32 @@ final class McpEndpoint {
                     + "and their slowest and latest calls with the request or task each ran in.", List.of()),
             new Tool("stop_trace", "Stops tracing a method and removes the recording.", List.of(
                     new Parameter("method", "string", "The traced method as list_traces names it, like "
-                            + "com.acme.OrderService.findAll", true))));
+                            + "com.acme.OrderService.findAll", true))),
+            new Tool("load_test", "Sends a GET request the application already served again many times from inside "
+                    + "its JVM and answers with the result as JSON: requests per second, latency percentiles, status "
+                    + "codes and, from QueryScope's traces of those requests, queries per request, database time and "
+                    + "findings. Waits up to 30 s, a longer test keeps running and get_load_test shows it.", List.of(
+                    new Parameter("id", "integer", "The id of a GET request from list_requests", true),
+                    new Parameter("requests", "integer", "How many requests to send, "
+                            + LoadTestRequest.DEFAULT_REQUESTS + " by default, at most " + LoadTestPlan.MAX_REQUESTS,
+                            false),
+                    new Parameter("concurrency", "integer", "How many to send at the same time, "
+                            + LoadTestRequest.DEFAULT_CONCURRENCY + " by default, at most "
+                            + LoadTestPlan.MAX_CONCURRENCY, false))),
+            new Tool("get_load_test", "The latest load test as JSON, finished or still running.", List.of()));
 
     private final ReportStore store;
     private final AppPackages callTreePackages;
     private final MethodTracer tracer;
+    private final LoadTester loadTester;
     private final Supplier<String> report;
 
-    McpEndpoint(ReportStore store, AppPackages callTreePackages, MethodTracer tracer, Supplier<String> report) {
+    McpEndpoint(ReportStore store, AppPackages callTreePackages, MethodTracer tracer, LoadTester loadTester,
+                Supplier<String> report) {
         this.store = store;
         this.callTreePackages = callTreePackages;
         this.tracer = tracer;
+        this.loadTester = loadTester;
         this.report = report;
     }
 
@@ -145,8 +166,25 @@ final class McpEndpoint {
                 }
                 yield "QueryScope stopped tracing " + method + ".";
             }
+            case "load_test" -> {
+                loadTester.start(LoadTestRequest.plan(arguments, store));
+                yield latestLoadTest(LOAD_TEST_WAIT);
+            }
+            case "get_load_test" -> latestLoadTest(Duration.ZERO);
             default -> throw new IllegalArgumentException("QueryScope has no tool " + name);
         };
+    }
+
+    private String latestLoadTest(Duration wait) {
+        Optional<LoadTestResult> latest;
+        try {
+            latest = loadTester.awaitLatest(wait);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            latest = loadTester.latest();
+        }
+        return latest.map(LoadTestJson::resultToJson).orElseThrow(() -> new IllegalStateException(
+                "QueryScope has run no load test yet, load_test starts one"));
     }
 
     private String requestText(long id) {

@@ -5,7 +5,9 @@ import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.console.AiReport;
 import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.http.HttpSupport;
+import me.fertiz.queryscope.agent.http.JsonReader;
 import me.fertiz.queryscope.agent.http.LocalServer;
+import me.fertiz.queryscope.agent.loadtest.LoadTester;
 import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
 import me.fertiz.queryscope.agent.profiler.Profile;
 import me.fertiz.queryscope.agent.profiler.SampleStore;
@@ -44,6 +46,7 @@ public final class PanelServer {
     private static final Pattern TRACE_REQUEST =
             Pattern.compile("\\{\\s*\"method\"\\s*:\\s*\"([^\"\\\\]{1,500})\"\\s*}");
     private static final String TRACES_PATH = "/api/traces";
+    private static final String LOAD_TESTS_PATH = "/api/load-tests";
     private static final String MARKDOWN = "text/markdown; charset=utf-8";
     private static final long REPORT_WINDOW_MILLIS = 5 * 60 * 1000;
     private static final int MAX_BODY = 1024;
@@ -53,26 +56,29 @@ public final class PanelServer {
     private final AppPackages application;
     private final SampleStore samples;
     private final MethodTracer tracer;
+    private final LoadTester loadTester;
 
     private PanelServer(ReportStore store, AppPackages callTreePackages, AppPackages application, SampleStore samples,
-                        MethodTracer tracer) {
+                        MethodTracer tracer, LoadTester loadTester) {
         this.store = store;
         this.callTreePackages = callTreePackages;
         this.application = application;
         this.samples = samples;
         this.tracer = tracer;
+        this.loadTester = loadTester;
     }
 
     public static LocalServer start(int port, boolean portGiven, ReportStore store, AppPackages callTreePackages,
-                                    AppPackages application, SampleStore samples, MethodTracer tracer)
-            throws IOException {
-        PanelServer panel = new PanelServer(store, callTreePackages, application, samples, tracer);
-        McpEndpoint mcp = new McpEndpoint(store, callTreePackages, tracer, panel::aiReport);
+                                    AppPackages application, SampleStore samples, MethodTracer tracer,
+                                    LoadTester loadTester) throws IOException {
+        PanelServer panel = new PanelServer(store, callTreePackages, application, samples, tracer, loadTester);
+        McpEndpoint mcp = new McpEndpoint(store, callTreePackages, tracer, loadTester, panel::aiReport);
         return LocalServer.start(port, portGiven, "queryscope-panel", Map.of(
                 "/", HttpSupport.staticFiles(ASSETS),
                 "/api/requests", panel::serveRequests,
                 "/api/profile", panel::serveProfile,
                 TRACES_PATH, panel::serveTraces,
+                LOAD_TESTS_PATH, panel::serveLoadTests,
                 "/api/report.md", panel::serveAiReport,
                 "/api/events", panel::streamEvents,
                 "/mcp", mcp::serve));
@@ -190,6 +196,45 @@ public final class PanelServer {
             return;
         }
         sendStatus(exchange, tracer.stop(method) ? 204 : 404);
+    }
+
+    private void serveLoadTests(HttpExchange exchange) throws IOException {
+        if (!exchange.getRequestURI().getPath().equals(LOAD_TESTS_PATH)) {
+            sendStatus(exchange, 404);
+            return;
+        }
+        switch (exchange.getRequestMethod()) {
+            case "GET" -> respond(exchange, 200, JSON, LoadTestJson.latestToJson(loadTester.latest()));
+            case "POST" -> startLoadTest(exchange);
+            case "DELETE" -> stopLoadTest(exchange);
+            default -> sendStatus(exchange, 405);
+        }
+    }
+
+    private void startLoadTest(HttpExchange exchange) throws IOException {
+        if (!requireJsonFromSameOrigin(exchange)) {
+            return;
+        }
+        try {
+            if (!(JsonReader.parse(readBody(exchange, MAX_BODY)) instanceof Map<?, ?> fields)) {
+                throw new IllegalArgumentException(
+                        "Send the load test as {\"id\": 17, \"requests\": 100, \"concurrency\": 10}");
+            }
+            respond(exchange, 200, JSON, LoadTestJson.resultToJson(
+                    loadTester.start(LoadTestRequest.plan(fields, store))));
+        } catch (IllegalArgumentException e) {
+            respond(exchange, 400, JSON, errorJson(e.getMessage()));
+        } catch (IllegalStateException e) {
+            respond(exchange, 409, JSON, errorJson(e.getMessage()));
+        }
+    }
+
+    private void stopLoadTest(HttpExchange exchange) throws IOException {
+        if (!HttpSupport.sameOrigin(exchange)) {
+            sendStatus(exchange, 403);
+            return;
+        }
+        sendStatus(exchange, loadTester.stop() ? 204 : 404);
     }
 
     private void streamEvents(HttpExchange exchange) throws IOException {

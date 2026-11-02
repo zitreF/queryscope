@@ -1,7 +1,10 @@
 package me.fertiz.queryscope.agent.panel;
 
+import com.sun.net.httpserver.HttpServer;
 import me.fertiz.queryscope.agent.appcode.AppPackages;
+import me.fertiz.queryscope.agent.http.HttpSupport;
 import me.fertiz.queryscope.agent.http.LocalServer;
+import me.fertiz.queryscope.agent.loadtest.LoadTester;
 import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
 import me.fertiz.queryscope.agent.profiler.SampleStore;
 import org.junit.jupiter.api.AfterEach;
@@ -12,6 +15,8 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -22,6 +27,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,7 +47,7 @@ class PanelServerTest {
     @BeforeEach
     void startPanel() throws IOException {
         AppPackages acme = AppPackages.of(List.of("com.acme"));
-        panel = PanelServer.start(0, true, store, acme, acme, samples, tracer);
+        panel = PanelServer.start(0, true, store, acme, acme, samples, tracer, new LoadTester());
     }
 
     @AfterEach
@@ -125,7 +132,8 @@ class PanelServerTest {
 
     @Test
     void startsListsAndStopsMethodTraces() throws Exception {
-        HttpResponse<String> started = postTrace("{\"method\": \"com.acme.OrderService#findAll\"}", null);
+        HttpResponse<String> started = postJson("/api/traces", "{\"method\": \"com.acme.OrderService#findAll\"}",
+                null);
 
         assertEquals(200, started.statusCode());
         assertEquals("{\"method\":\"com.acme.OrderService.findAll\",\"loadedClasses\":0}", started.body());
@@ -142,12 +150,56 @@ class PanelServerTest {
 
         assertEquals(415, client.send(request("/api/traces").POST(HttpRequest.BodyPublishers.ofString(body))
                 .header("Content-Type", "text/plain").build(), HttpResponse.BodyHandlers.ofString()).statusCode());
-        assertEquals(403, postTrace(body, "http://attacker.example").statusCode());
-        assertEquals(400, postTrace("{\"method\": \"findAll\"}", null).statusCode());
-        HttpResponse<String> jdk = postTrace("{\"method\": \"java.lang.String#length\"}", null);
+        assertEquals(403, postJson("/api/traces", body, "http://attacker.example").statusCode());
+        assertEquals(400, postJson("/api/traces", "{\"method\": \"findAll\"}", null).statusCode());
+        HttpResponse<String> jdk = postJson("/api/traces", "{\"method\": \"java.lang.String#length\"}", null);
         assertEquals(400, jdk.statusCode());
         assertTrue(jdk.body().contains("classes of the JDK and of QueryScope stay as they are"), jdk.body());
         assertEquals("{\"limit\":20,\"traces\":[]}", get("/api/traces").body());
+    }
+
+    @Test
+    void loadTestsAGetRequestOnThePortItCameIn() throws Exception {
+        Set<String> runs = ConcurrentHashMap.newKeySet();
+        HttpServer application = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        application.createContext("/books", exchange -> {
+            runs.add(exchange.getRequestURI() + " run "
+                    + exchange.getRequestHeaders().getFirst("X-QueryScope-Load-Test"));
+            HttpSupport.sendStatus(exchange, 204);
+        });
+        application.start();
+        try {
+            store.add(Reports.servedOnPort(3, "/books?page=2", application.getAddress().getPort()));
+
+            HttpResponse<String> started = postJson("/api/load-tests",
+                    "{\"id\": 3, \"requests\": 20, \"concurrency\": 4}", null);
+            String test = awaitLoadTest();
+
+            assertEquals(200, started.statusCode(), started.body());
+            assertTrue(started.body().startsWith("{\"id\":1,\"endpoint\":\"GET /books\",\"target\":\"http://127.0.0.1:"),
+                    started.body());
+            assertTrue(test.contains("\"answered\":20,\"failed\":0,\"firstError\":null"), test);
+            assertTrue(test.contains("\"statuses\":[{\"status\":204,\"count\":20}]"), test);
+            assertEquals(Set.of("/books?page=2 run 1"), runs);
+            assertEquals(404, delete("/api/load-tests").statusCode());
+        } finally {
+            application.stop(0);
+        }
+    }
+
+    @Test
+    void refusesLoadTestsItCannotRun() throws Exception {
+        store.add(Reports.plain(1, "/orders"));
+
+        HttpResponse<String> noPort = postJson("/api/load-tests", "{\"id\": 1}", null);
+
+        assertEquals(400, noPort.statusCode());
+        assertTrue(noPort.body().contains("does not know the port request 1 came in on"), noPort.body());
+        assertEquals(400, postJson("/api/load-tests", "{\"id\": 99}", null).statusCode());
+        assertEquals(400, postJson("/api/load-tests", "[1]", null).statusCode());
+        assertEquals(403, postJson("/api/load-tests", "{\"id\": 1}", "http://attacker.example").statusCode());
+        assertEquals(404, delete("/api/load-tests").statusCode());
+        assertEquals("{\"maxRequests\":10000,\"maxConcurrency\":50,\"test\":null}", get("/api/load-tests").body());
     }
 
     @Test
@@ -163,8 +215,19 @@ class PanelServerTest {
         }
     }
 
-    private HttpResponse<String> postTrace(String body, String origin) throws Exception {
-        HttpRequest.Builder post = request("/api/traces").POST(HttpRequest.BodyPublishers.ofString(body))
+    private String awaitLoadTest() throws Exception {
+        for (int attempt = 0; attempt < 300; attempt++) {
+            String latest = get("/api/load-tests").body();
+            if (latest.contains("\"state\":\"finished\"")) {
+                return latest;
+            }
+            Thread.sleep(50);
+        }
+        throw new AssertionError("The load test did not finish: " + get("/api/load-tests").body());
+    }
+
+    private HttpResponse<String> postJson(String path, String body, String origin) throws Exception {
+        HttpRequest.Builder post = request(path).POST(HttpRequest.BodyPublishers.ofString(body))
                 .header("Content-Type", "application/json");
         if (origin != null) {
             post.header("Origin", origin);

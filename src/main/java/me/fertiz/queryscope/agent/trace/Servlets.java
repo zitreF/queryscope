@@ -1,6 +1,5 @@
 package me.fertiz.queryscope.agent.trace;
 
-
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
@@ -17,6 +16,7 @@ public final class Servlets {
 
     private static final MethodType GETTER = MethodType.methodType(Object.class, Object.class);
     private static final MethodType INT_GETTER = MethodType.methodType(int.class, Object.class);
+    private static final MethodType HEADER_GETTER = MethodType.methodType(Object.class, Object.class, String.class);
 
     private static final ClassValue<Optional<RequestGetters>> REQUESTS = new ClassValue<>() {
         @Override
@@ -82,7 +82,8 @@ public final class Servlets {
 
     private static MethodHandle publicGetter(Class<?> api, String name, MethodType type) {
         try {
-            return MethodHandles.publicLookup().unreflect(api.getMethod(name)).asType(type);
+            return MethodHandles.publicLookup().unreflect(api.getMethod(name, type.dropParameterTypes(0, 1)
+                    .parameterArray())).asType(type);
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(api.getName() + " has no usable " + name + "()", e);
         }
@@ -101,14 +102,16 @@ public final class Servlets {
     }
 
     private record RequestGetters(MethodHandle method, MethodHandle uri, MethodHandle query,
-                                  MethodHandle dispatcherType) {
+                                  MethodHandle dispatcherType, MethodHandle localPort, MethodHandle header) {
 
         private static RequestGetters of(Class<?> api) {
             return new RequestGetters(
                     publicGetter(api, "getMethod", GETTER),
                     publicGetter(api, "getRequestURI", GETTER),
                     publicGetter(api, "getQueryString", GETTER),
-                    publicGetter(api, "getDispatcherType", GETTER));
+                    publicGetter(api, "getDispatcherType", GETTER),
+                    publicGetter(api, "getLocalPort", INT_GETTER),
+                    publicGetter(api, "getHeader", HEADER_GETTER));
         }
 
         private boolean isFirstDispatch(Object request) {
@@ -119,11 +122,28 @@ public final class Servlets {
             }
         }
 
+        private int readLocalPort(Object request) {
+            try {
+                return (int) localPort.invokeExact(request);
+            } catch (Throwable e) {
+                return UnitTracer.UNKNOWN_PORT;
+            }
+        }
+
+        private String readLoadTestHeader(Object request) {
+            try {
+                Object value = header.invokeExact(request, UnitTracer.LOAD_TEST_HEADER);
+                return (String) value;
+            } catch (Throwable e) {
+                return null;
+            }
+        }
+
         private boolean startRequest(Object request) {
             try {
                 return UnitTracer.requestStarted(
                         (String) callGetter(method, request), (String) callGetter(uri, request),
-                        (String) callGetter(query, request));
+                        (String) callGetter(query, request), readLocalPort(request), readLoadTestHeader(request));
             } catch (Throwable e) {
                 return false;
             }

@@ -10,6 +10,7 @@ import me.fertiz.queryscope.agent.findings.QueryAnalyzer;
 import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.http.Browser;
 import me.fertiz.queryscope.agent.http.LocalServer;
+import me.fertiz.queryscope.agent.loadtest.LoadTester;
 import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
 import me.fertiz.queryscope.agent.panel.PanelServer;
 import me.fertiz.queryscope.agent.panel.ReportStore;
@@ -27,7 +28,6 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class QueryScopeAgent {
-
 
     private static final System.Logger LOGGER = System.getLogger("QueryScope");
     private static final int STORED_REQUESTS = 200;
@@ -68,7 +68,8 @@ public final class QueryScopeAgent {
         ConsoleReporter console = new ConsoleReporter();
         ReportStore store = new ReportStore(STORED_REQUESTS);
         SessionSummary summary = new SessionSummary(Clock.systemUTC());
-        UnitTracer.publishTo(trace -> analyzeAndPublish(trace, analyzer, console, store, summary));
+        LoadTester loadTester = new LoadTester();
+        UnitTracer.publishTo(trace -> analyzeAndPublish(trace, analyzer, console, store, summary, loadTester));
         AppPackages application = config.packages().isEmpty()
                 ? AppPackages.fromMainClass()
                 : AppPackages.of(config.packages());
@@ -84,7 +85,7 @@ public final class QueryScopeAgent {
         startTraces(tracer, config.traceMethods());
         SampleStore samples = new SampleStore(Clock.systemUTC(), STORED_SAMPLES, SAMPLE_AGE);
         Sampling sampling = config.sampling() ? Sampling.start(samples, config.sampleInterval()) : null;
-        startPanel(config, store, callTreePackages, application, samples, tracer);
+        startPanel(config, store, callTreePackages, application, samples, tracer, loadTester);
         if (config.printSummary()) {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 if (sampling != null) {
@@ -97,7 +98,11 @@ public final class QueryScopeAgent {
     }
 
     private static void analyzeAndPublish(UnitTrace trace, QueryAnalyzer analyzer, ConsoleReporter console,
-                                          ReportStore store, SessionSummary summary) {
+                                          ReportStore store, SessionSummary summary, LoadTester loadTester) {
+        if (loadTester.sent(trace)) {
+            loadTester.record(analyzer.analyze(trace));
+            return;
+        }
         boolean ranSql = !trace.queries().isEmpty();
         if (!ranSql && trace.callTree().topLevelCalls().isEmpty()) {
             return;
@@ -145,10 +150,11 @@ public final class QueryScopeAgent {
     }
 
     private static void startPanel(AgentConfig config, ReportStore store, AppPackages callTreePackages,
-                                   AppPackages application, SampleStore samples, MethodTracer tracer) {
+                                   AppPackages application, SampleStore samples, MethodTracer tracer,
+                                   LoadTester loadTester) {
         try {
             LocalServer panel = PanelServer.start(config.port(), config.portGiven(), store, callTreePackages,
-                    application, samples, tracer);
+                    application, samples, tracer, loadTester);
             String url = "http://localhost:" + panel.port();
             System.setProperty(AgentProperties.PANEL_PORT, String.valueOf(panel.port()));
             LOGGER.log(System.Logger.Level.INFO, "QueryScope panel is running at " + url);

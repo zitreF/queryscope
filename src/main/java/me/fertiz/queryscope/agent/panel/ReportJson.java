@@ -4,6 +4,7 @@ import me.fertiz.queryscope.agent.calltree.CallNode;
 import me.fertiz.queryscope.agent.calltree.CallTree;
 import me.fertiz.queryscope.agent.findings.DuplicateQuery;
 import me.fertiz.queryscope.agent.findings.Finding;
+import me.fertiz.queryscope.agent.findings.FindingKind;
 import me.fertiz.queryscope.agent.findings.LargeResult;
 import me.fertiz.queryscope.agent.findings.NPlusOne;
 import me.fertiz.queryscope.agent.findings.RepeatedWrite;
@@ -60,6 +61,7 @@ final class ReportJson {
                 .name("method").value(trace.method())
                 .name("path").value(trace.path())
                 .name("status").value(trace.status())
+                .name("port").value(trace.localPort())
                 .name("startedAt").value(trace.startedAt().toString())
                 .name("durationMs").value(toMillis(trace.durationNanos()))
                 .name("queries").beginArray();
@@ -95,22 +97,34 @@ final class ReportJson {
         writeFindingFields(json.beginObject(), finding).endObject();
     }
 
+    static String typeOf(FindingKind kind) {
+        return switch (kind) {
+            case N_PLUS_ONE -> "nPlusOne";
+            case REPEATED_WRITE -> "repeatedWrite";
+            case DUPLICATE_QUERY -> "duplicateQuery";
+            case SLOW_QUERY -> "slowQuery";
+            case LARGE_RESULT -> "largeResult";
+            case TOO_MANY_QUERIES -> "tooManyQueries";
+            case SLOW_METHOD -> "slowMethod";
+        };
+    }
+
     private static JsonWriter writeFindingFields(JsonWriter json, Finding finding) {
+        json.name("type").value(typeOf(finding.kind()));
         return switch (finding.kind()) {
             case N_PLUS_ONE -> {
                 NPlusOne nPlusOne = (NPlusOne) finding;
-                yield writeRepeatedStatementFields(json, "nPlusOne", nPlusOne.normalizedSql(), nPlusOne.callSite(),
+                yield writeRepeatedStatementFields(json, nPlusOne.normalizedSql(), nPlusOne.callSite(),
                         nPlusOne.queryIndexes(), nPlusOne.totalNanos());
             }
             case REPEATED_WRITE -> {
                 RepeatedWrite write = (RepeatedWrite) finding;
-                yield writeRepeatedStatementFields(json, "repeatedWrite", write.normalizedSql(), write.callSite(),
+                yield writeRepeatedStatementFields(json, write.normalizedSql(), write.callSite(),
                         write.queryIndexes(), write.totalNanos());
             }
             case DUPLICATE_QUERY -> {
                 DuplicateQuery duplicate = (DuplicateQuery) finding;
-                json.name("type").value("duplicateQuery")
-                        .name("sql").value(duplicate.normalizedSql())
+                json.name("sql").value(duplicate.normalizedSql())
                         .name("parameters").value(duplicate.parameters())
                         .name("callSite").value(duplicate.callSite())
                         .name("executions").value(duplicate.executions());
@@ -118,28 +132,26 @@ final class ReportJson {
             }
             case SLOW_QUERY -> {
                 SlowQuery slow = (SlowQuery) finding;
-                yield writeQueryFindingFields(json, "slowQuery", slow.normalizedSql(), slow.query())
+                yield writeQueryFindingFields(json, slow.normalizedSql(), slow.query())
                         .name("durationMs").value(toMillis(slow.query().durationNanos()))
                         .name("queryIndex").value(slow.queryIndex());
             }
             case LARGE_RESULT -> {
                 LargeResult large = (LargeResult) finding;
-                yield writeQueryFindingFields(json, "largeResult", large.normalizedSql(), large.query())
+                yield writeQueryFindingFields(json, large.normalizedSql(), large.query())
                         .name("rows").value(large.query().rows())
                         .name("queryIndex").value(large.queryIndex());
             }
             case TOO_MANY_QUERIES -> {
                 TooManyQueries tooMany = (TooManyQueries) finding;
-                yield json.name("type").value("tooManyQueries")
-                        .name("queries").value(tooMany.queries())
+                yield json.name("queries").value(tooMany.queries())
                         .name("limit").value(tooMany.limit())
                         .name("databaseMs").value(toMillis(tooMany.databaseNanos()))
                         .name("durationMs").value(toMillis(tooMany.durationNanos()));
             }
             case SLOW_METHOD -> {
                 SlowMethod method = (SlowMethod) finding;
-                yield json.name("type").value("slowMethod")
-                        .name("method").value(method.method())
+                yield json.name("method").value(method.method())
                         .name("calls").value(method.calls())
                         .name("ownMs").value(toMillis(method.ownNanos()))
                         .name("durationMs").value(toMillis(method.durationNanos()));
@@ -160,16 +172,14 @@ final class ReportJson {
         json.endArray().endObject();
     }
 
-    private static JsonWriter writeQueryFindingFields(JsonWriter json, String type, String sql, QueryExecution query) {
-        return json.name("type").value(type)
-                .name("sql").value(sql)
+    private static JsonWriter writeQueryFindingFields(JsonWriter json, String sql, QueryExecution query) {
+        return json.name("sql").value(sql)
                 .name("callSite").value(query.callSite());
     }
 
-    private static JsonWriter writeRepeatedStatementFields(JsonWriter json, String type, String sql, String callSite,
+    private static JsonWriter writeRepeatedStatementFields(JsonWriter json, String sql, String callSite,
                                                 List<Integer> queryIndexes, long totalNanos) {
-        json.name("type").value(type)
-                .name("sql").value(sql)
+        json.name("sql").value(sql)
                 .name("callSite").value(callSite)
                 .name("executions").value(queryIndexes.size())
                 .name("totalMs").value(toMillis(totalNanos));

@@ -16,7 +16,8 @@ public final class JdkHttpServerRequests {
             return false;
         }
         URI uri = http.getRequestURI();
-        return UnitTracer.requestStarted(http.getRequestMethod(), uri.getRawPath(), uri.getRawQuery());
+        return UnitTracer.requestStarted(http.getRequestMethod(), uri.getRawPath(), uri.getRawQuery(),
+                http.getLocalAddress().getPort(), http.getRequestHeaders().getFirst(UnitTracer.LOAD_TEST_HEADER));
     }
 
     public static void requestFinished(Object exchange, Throwable thrown) {

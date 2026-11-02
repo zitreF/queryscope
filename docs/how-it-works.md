@@ -238,6 +238,24 @@ eight buckets per power of two, so a percentile is off by at most an eighth, and
 fixed arrays with their thread and the id and name of the unit of work they ran in, so recording a call allocates
 nothing. While all calls of a method are among its latest 50, percentiles come from them exactly.
 
+## Load testing
+
+Every HTTP unit remembers the local port its request came in on, from `getLocalPort()` of the servlet request or the
+local address of the JDK's `HttpExchange`. `LoadTestPlan.replaying` turns a stored GET request into a target on
+`127.0.0.1` with that port and its path, and refuses anything else.
+
+`LoadTester` runs one `LoadTest` at a time on up to 50 daemon threads that share a counter of requests to send. Each
+request goes through `HttpURLConnection` without a proxy and without following redirects, and carries the header
+`X-QueryScope-Load-Test` with the number of the test. The time from sending to reading the whole answer goes into an
+array as long as the test, so the percentiles are exact.
+
+On the server the servlet and `HttpServer` hooks read that header into the unit, and the agent hands every unit of a
+test QueryScope started to the `LoadTester` instead of the report store, the console and the session summary. A test
+adds up their queries, time in the database and durations, and counts each kind of finding once per request, grouped
+the way the session summary groups them. When the last thread is done, the test waits up to two seconds for the
+traces of the last answers before it is marked finished and logs its summary line. A header with a number QueryScope
+never handed out is ignored, so it cannot hide requests from the panel.
+
 ## The panel
 
 **Server.** `PanelServer` is the JDK's built-in `com.sun.net.httpserver`, bound to loopback on daemon threads. It
@@ -250,7 +268,7 @@ into Markdown, grouping findings the way the session summary does. `/api/report.
 **Copy for AI** copies it. `McpEndpoint` is a Model Context Protocol server on the Streamable HTTP transport in its
 plainest form: each POST carries one JSON-RPC request and gets one JSON answer, notifications get `202`, and `GET`
 gets `405` because the server never pushes messages. It answers `initialize`, `ping`, `tools/list` and `tools/call`
-for six tools that wrap the report, the request store and the method tracer. A tool that fails answers with
+for eight tools that wrap the report, the request store, the method tracer and the load tester. A tool that fails answers with
 `isError` and a sentence the assistant can act on. Requests are read with `JsonReader`, a small parser written for
 this, because QueryScope brings no JSON library.
 
@@ -279,10 +297,11 @@ Everything QueryScope keeps has a limit:
 | Samples                       | 15 minutes, at most 200,000                        |
 | Session summary               | 500 endpoints, 200 distinct findings               |
 | Traced methods                | 20, each with its 50 latest and 10 slowest calls   |
+| Load tests                    | one at a time, the latest kept, 10,000 requests and 50 at once at most |
 | Statements and result sets    | held weakly, gone with the application's objects   |
 
 QueryScope's threads are daemons, so they never keep the application alive: `queryscope-panel-*` for the panel,
-`queryscope-flight-recorder` for the sampler, `queryscope-sampler-start` and `queryscope-panel-start` for startup, and
+`queryscope-flight-recorder` for the sampler, `queryscope-load-test-*` for load tests, `queryscope-sampler-start` and `queryscope-panel-start` for startup, and
 `queryscope-summary` as the shutdown hook. Samples taken on QueryScope's own threads are dropped. A finished unit is
 analyzed on the thread that ran it, because a report handed to another thread right before the JVM stops would lose
 its log line: logging frameworks close their handlers in shutdown hooks of their own.
@@ -337,11 +356,12 @@ me.fertiz.queryscope.agent             QueryScopeAgent (premain, agentmain), Age
 │                                      CallTree, CallNode
 ├── methodtrace                        tracing chosen methods: MethodTracer, MethodTraceAdvice, MethodTraces,
 │                                      TracedMethod, LatencyHistogram
+├── loadtest                           LoadTester, LoadTest, LoadTestPlan, LoadTestResult, LoopbackHttp
 ├── findings                           QueryAnalyzer, SqlNormalizer, Thresholds, FindingKind and the finding records
 ├── profiler                           Sampling, JfrSampler, ThreadDumpSampler, SampleStore, Profile
 ├── console                            ConsoleReporter, SessionSummary, FindingText, AiReport
 ├── panel                              PanelServer, ReportStore, ReportJson, ProfileJson, ProfileQuery,
-│                                      MethodTraceJson, McpEndpoint
+│                                      MethodTraceJson, LoadTestJson, LoadTestRequest, McpEndpoint
 ├── hub                                HubServer, LocalProcesses, JavaProcess
 ├── http                               LocalServer, HttpSupport, JsonWriter, JsonReader, Browser, shared by panel
 │                                      and hub
@@ -349,7 +369,7 @@ me.fertiz.queryscope.agent             QueryScopeAgent (premain, agentmain), Age
 ```
 
 Dependencies point one way, with no package cycles: `cli` uses `hub`, `http` and `config`; the agent's root package
-uses the feature packages; `panel`, `console`, `findings` and `trace` build on each other in that order; and
+uses the feature packages; `panel`, `loadtest`, `console`, `findings` and `trace` build on each other in that order; and
 `appcode`, `http` and `config` (apart from `findings.Thresholds`) depend on nothing else in QueryScope.
 
 The web pages live in `src/main/resources/me/fertiz/queryscope/agent/web`. The tests mirror the packages, and

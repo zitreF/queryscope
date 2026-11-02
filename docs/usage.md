@@ -178,7 +178,31 @@ hides the clean ones. The details of a request show:
 - a timeline with one bar per query, coloured by the finding it belongs to;
 - every query with its start, duration, rows, SQL with syntax highlighting, bound parameters and call site.
 
-**Call tree** in the header opens the same request in the Java area.
+**Call tree** in the header opens the same request in the Java area, and **Load test** opens it in the load test
+view.
+
+### SQL → Load test
+
+A load test sends a GET request the app already served again and again and shows how the endpoint holds up. Pick
+the request in the view, or press **Load test** in the details of a request or a call tree, choose how many requests
+to send (up to 10,000) and how many at once (up to 50), and press **Start**. The numbers update every second, and
+**Stop** ends the test early.
+
+- **The client side**: requests per second, the median, p95, p99 and slowest answer, and the status codes. Requests
+  that got no answer are counted with the first error, such as `Connection refused`.
+- **On the server**: the same requests as QueryScope traced them inside the app, with the queries per request, the
+  time in the database, the median, p95 and slowest time in the app, and every finding with the number of requests
+  it showed up in. When the number of queries changes from request to request, the view says so: some queries depend
+  on the data.
+
+The requests carry an `X-QueryScope-Load-Test` header, so QueryScope counts them in the test and keeps them out of
+the request list, the console and the session summary. When a test finishes, the console gets one line:
+
+```
+QueryScope load test of GET /api/customers/naive finished: 300 of 300 requests answered in 5.73 s (52.4 per second), p50 87.3 ms, p95 738.0 ms, p99 1440.4 ms, 41.0 queries per request
+```
+
+One test runs at a time, and the panel keeps the latest one.
 
 ### Java → Profiler
 
@@ -258,6 +282,8 @@ Any other client that speaks MCP over HTTP is set up with the same URL. The tool
 | `trace_method`  | starts tracing a method, named as `com.acme.OrderService#findAll`                      |
 | `list_traces`   | the traced methods with their percentiles, slowest and latest calls                    |
 | `stop_trace`    | stops tracing a method                                                                 |
+| `load_test`     | load tests a GET request by its id, waits up to 30 s and answers with the result       |
+| `get_load_test` | the latest load test, finished or still running                                        |
 
 Like the rest of the panel, `/mcp` answers on localhost only and takes no requests from other web pages.
 
@@ -391,6 +417,9 @@ The panel is backed by a small JSON API on the same port:
 | `GET /api/traces`              | the traced methods with their counts, percentiles, slowest and latest calls           |
 | `POST /api/traces`             | starts tracing the method in a body like `{"method": "com.acme.OrderService#findAll"}` |
 | `DELETE /api/traces/{method}`  | stops tracing it, named as `com.acme.OrderService.findAll`                            |
+| `GET /api/load-tests`          | the latest load test, or `null`, with the limits on requests and concurrency          |
+| `POST /api/load-tests`         | starts a load test with a body like `{"id": 17, "requests": 100, "concurrency": 10}`  |
+| `DELETE /api/load-tests`       | stops the running load test                                                           |
 | `GET /api/report.md`           | the report for AI assistants in Markdown                                              |
 | `POST /mcp`                    | the MCP server, see [With an AI assistant](#with-an-ai-assistant)                     |
 
@@ -479,3 +508,8 @@ production.
 - Flight Recorder samples only threads running Java code, skips threads inside some JVM stubs such as array copies,
   and does not sample threads that sleep or wait on a lock.
 - An attached agent cannot be unloaded, and requests already running when it attaches are not recorded.
+- A load test sends plain HTTP GET requests to `127.0.0.1` on the port the request came in on, without the original
+  headers or cookies. An endpoint behind a login answers with its login response, and an app that serves only HTTPS
+  or listens on another address cannot be load tested.
+- The load comes from inside the application's JVM, so the test and the app share the CPU. Compare endpoints and
+  before and after a fix with it; it does not measure how much traffic a production server can take.

@@ -123,7 +123,7 @@ class QueryAnalyzerTest {
     void countsQueriesThatWereNotRecordedTowardsTooManyQueries() {
         List<QueryExecution> queries = List.of(query("select * from orders", SERVICE, 2));
         UnitTrace trace = new UnitTrace(1, UnitKind.HTTP, "GET", "/import", 200, Instant.now(),
-                Duration.ofMillis(50).toNanos(), queries, CallTree.EMPTY, 0, 1, 40, Duration.ofMillis(8).toNanos());
+                Duration.ofMillis(50).toNanos(), queries, CallTree.EMPTY, 0, 1, 40, Duration.ofMillis(8).toNanos(), 0, 0);
 
         TooManyQueries expected = new TooManyQueries(41, 10, Duration.ofMillis(10).toNanos(),
                 Duration.ofMillis(50).toNanos());
@@ -138,7 +138,7 @@ class QueryAnalyzerTest {
         CallNode mapperInJob = node("com.acme.OrderMapper.toDto", 10, 30, 30, false, List.of());
         CallNode job = node("com.acme.ImportJob.run", 1, 330, 100, true, List.of(), service, mapperInJob);
         UnitTrace trace = new UnitTrace(1, UnitKind.TASK, "TASK", "ImportJob.run", 0, Instant.now(),
-                Duration.ofMillis(330).toNanos(), queries, new CallTree(List.of(job), List.of(), false), 0, 1, 0, 0);
+                Duration.ofMillis(330).toNanos(), queries, new CallTree(List.of(job), List.of(), false), 0, 1, 0, 0, 0, 0);
 
         List<Finding> findings = analyzer.analyze(trace).findings();
 
@@ -154,7 +154,7 @@ class QueryAnalyzerTest {
         CallNode render = node("com.acme.ReportService.render", 1, 400, 400, false, List.of());
         UnitTrace trace = new UnitTrace(1, UnitKind.HTTP, "GET", "/report", 200, Instant.now(),
                 Duration.ofMillis(400).toNanos(), List.of(), new CallTree(List.of(render), List.of(), false),
-                UnitTrace.WARM_UP_CLASSES, 1, 0, 0);
+                UnitTrace.WARM_UP_CLASSES, 1, 0, 0, 0, 0);
 
         assertEquals(List.of(), analyzer.analyze(trace).findings());
     }

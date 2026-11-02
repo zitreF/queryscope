@@ -38,6 +38,7 @@
             <button type="button" class="subtab" data-view="sql/requests" aria-controls="view-requests">
                 Requests <span class="tab-count" id="request-count">0</span>
             </button>
+            <button type="button" class="subtab" data-view="sql/load-test" aria-controls="view-load-test">Load test</button>
         </div>
         <div class="subtab-group" data-area="java" hidden>
             <button type="button" class="subtab" data-view="java/profile" aria-controls="view-profile">Profiler</button>
@@ -112,6 +113,32 @@
             </aside>
             <article class="details" id="details"></article>
         </div>
+    </section>
+
+    <section class="view" id="view-load-test" role="tabpanel" hidden>
+        <section class="panel">
+            <div class="panel-header">
+                <div>
+                    <h2>Load test</h2>
+                    <p class="panel-hint">Sends a GET request your app already served again and again from inside its
+                        JVM, then shows how throughput, latency and queries hold up. These requests stay out of the
+                        request list.</p>
+                </div>
+            </div>
+            <form class="trace-form load-form" id="load-form">
+                <select class="select load-target" id="load-request" aria-label="Request to send again"></select>
+                <label class="load-field">Requests
+                    <input type="number" class="search" id="load-requests" min="1" max="10000" value="100">
+                </label>
+                <label class="load-field">At once
+                    <input type="number" class="search" id="load-concurrency" min="1" max="50" value="10">
+                </label>
+                <button type="submit" class="filled-button" id="load-start">Start</button>
+                <button type="button" class="text-button" id="load-stop" hidden>Stop</button>
+                <span class="trace-error" id="load-error" role="alert"></span>
+            </form>
+        </section>
+        <div class="load-result" id="load-result"></div>
     </section>
 
     <section class="view" id="view-profile" role="tabpanel" hidden>

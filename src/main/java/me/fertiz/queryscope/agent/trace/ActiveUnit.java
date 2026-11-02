@@ -24,6 +24,8 @@ final class ActiveUnit {
     private final String method;
     private final String path;
     private final boolean startedByQuery;
+    private final int localPort;
+    private final long loadTestRun;
     private final Instant startedAt = Instant.now();
     private final long startedNanos = System.nanoTime();
     private final long classesAtStart = CLASSES.getTotalLoadedClassCount();
@@ -37,24 +39,29 @@ final class ActiveUnit {
     private long omittedNanos;
     private String label;
 
-    private ActiveUnit(long id, UnitKind kind, String method, String path, boolean startedByQuery) {
+    private ActiveUnit(long id, UnitKind kind, String method, String path, boolean startedByQuery, int localPort,
+                       long loadTestRun) {
         this.id = id;
         this.kind = kind;
         this.method = method;
         this.path = path;
         this.startedByQuery = startedByQuery;
+        this.localPort = localPort;
+        this.loadTestRun = loadTestRun;
     }
 
-    static ActiveUnit http(long id, String method, String path) {
-        return new ActiveUnit(id, UnitKind.HTTP, method, path, false);
+    static ActiveUnit http(long id, String method, String path, int localPort, long loadTestRun) {
+        return new ActiveUnit(id, UnitKind.HTTP, method, path, false, localPort, loadTestRun);
     }
 
     static ActiveUnit entry(long id, String name) {
-        return new ActiveUnit(id, UnitKind.TASK, TASK_METHOD, name, false);
+        return new ActiveUnit(id, UnitKind.TASK, TASK_METHOD, name, false, UnitTracer.UNKNOWN_PORT,
+                UnitTracer.NO_LOAD_TEST);
     }
 
     static ActiveUnit startedByQuery(long id, String name) {
-        return new ActiveUnit(id, UnitKind.TASK, TASK_METHOD, name, true);
+        return new ActiveUnit(id, UnitKind.TASK, TASK_METHOD, name, true, UnitTracer.UNKNOWN_PORT,
+                UnitTracer.NO_LOAD_TEST);
     }
 
     long id() {
@@ -130,6 +137,7 @@ final class ActiveUnit {
         return new UnitTrace(
                 id, kind, method, path, status, startedAt, endNanos - startedNanos,
                 Collections.unmodifiableList(executions), callTree,
-                CLASSES.getTotalLoadedClassCount() - classesAtStart, threadId, omittedQueries, omittedNanos);
+                CLASSES.getTotalLoadedClassCount() - classesAtStart, threadId, omittedQueries, omittedNanos, localPort,
+                loadTestRun);
     }
 }

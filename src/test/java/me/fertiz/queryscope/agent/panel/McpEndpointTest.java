@@ -1,8 +1,11 @@
 package me.fertiz.queryscope.agent.panel;
 
+import com.sun.net.httpserver.HttpServer;
 import me.fertiz.queryscope.agent.appcode.AppPackages;
+import me.fertiz.queryscope.agent.http.HttpSupport;
 import me.fertiz.queryscope.agent.http.JsonReader;
 import me.fertiz.queryscope.agent.http.LocalServer;
+import me.fertiz.queryscope.agent.loadtest.LoadTester;
 import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
 import me.fertiz.queryscope.agent.profiler.SampleStore;
 import org.junit.jupiter.api.AfterEach;
@@ -10,6 +13,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -34,7 +39,7 @@ class McpEndpointTest {
     void startPanel() throws IOException {
         AppPackages acme = AppPackages.of(List.of("com.acme"));
         SampleStore samples = new SampleStore(Clock.systemUTC(), 100, Duration.ofMinutes(5));
-        panel = PanelServer.start(0, true, store, acme, acme, samples, tracer);
+        panel = PanelServer.start(0, true, store, acme, acme, samples, tracer, new LoadTester());
         store.add(Reports.withFindings());
     }
 
@@ -54,7 +59,8 @@ class McpEndpointTest {
         assertEquals(202, post("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}", null).statusCode());
         List<?> tools = (List<?>) result(call("{\"jsonrpc\":\"2.0\",\"id\":\"two\",\"method\":\"tools/list\"}"))
                 .get("tools");
-        assertEquals(List.of("get_report", "list_requests", "get_request", "trace_method", "list_traces", "stop_trace"),
+        assertEquals(List.of("get_report", "list_requests", "get_request", "trace_method", "list_traces", "stop_trace",
+                        "load_test", "get_load_test"),
                 tools.stream().map(tool -> ((Map<?, ?>) tool).get("name")).toList());
     }
 
@@ -78,6 +84,28 @@ class McpEndpointTest {
         assertTrue(toolText(callTool("list_traces", "{}")).contains("\"method\":\"com.acme.OrderService.findAll\""));
         assertEquals("QueryScope stopped tracing com.acme.OrderService.findAll.",
                 toolText(callTool("stop_trace", "{\"method\":\"com.acme.OrderService.findAll\"}")));
+    }
+
+    @Test
+    void loadTestsARequestAndAnswersWithTheResult() throws Exception {
+        HttpServer application = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        application.createContext("/books", exchange -> HttpSupport.sendStatus(exchange, 204));
+        application.start();
+        try {
+            Map<?, ?> nothingYet = result(callTool("get_load_test", "{}"));
+            store.add(Reports.servedOnPort(3, "/books", application.getAddress().getPort()));
+
+            String test = toolText(callTool("load_test", "{\"id\":3,\"requests\":12,\"concurrency\":3}"));
+
+            assertEquals(true, nothingYet.get("isError"));
+            assertTrue(test.contains("\"requests\":12,\"concurrency\":3,\"state\":\"finished\""), test);
+            assertTrue(test.contains("\"answered\":12"), test);
+            assertEquals(test, toolText(callTool("get_load_test", "{}")));
+            assertTrue(toolText(callTool("load_test", "{\"id\":7}"))
+                    .contains("does not know the port request 7 came in on"));
+        } finally {
+            application.stop(0);
+        }
     }
 
     @Test

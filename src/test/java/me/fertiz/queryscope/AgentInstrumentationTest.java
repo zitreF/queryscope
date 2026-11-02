@@ -18,6 +18,8 @@ import me.fertiz.queryscope.agent.findings.QueryAnalyzer;
 import me.fertiz.queryscope.agent.findings.TooManyQueries;
 import me.fertiz.queryscope.agent.http.HttpSupport;
 import me.fertiz.queryscope.agent.http.LocalServer;
+import me.fertiz.queryscope.agent.loadtest.LoadTestPlan;
+import me.fertiz.queryscope.agent.loadtest.LoadTester;
 import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
 import me.fertiz.queryscope.agent.methodtrace.TracedMethod;
 import me.fertiz.queryscope.agent.trace.QueryExecution;
@@ -61,6 +63,7 @@ class AgentInstrumentationTest {
     private static final List<UnitTrace> TRACES = new CopyOnWriteArrayList<>();
     private static final String BY_ID = "select title from books where id = ?";
     private static final long PAUSE_MILLIS = 200;
+    private static final int APP_PORT = 8080;
 
     private static HikariDataSource dataSource;
     private static Instrumentation instrumentation;
@@ -109,7 +112,23 @@ class AgentInstrumentationTest {
         assertEquals("GET", trace.method());
         assertEquals("/books", trace.path());
         assertEquals(200, trace.status());
+        assertEquals(APP_PORT, trace.localPort());
+        assertEquals(UnitTracer.NO_LOAD_TEST, trace.loadTestRun());
         assertEquals(List.of(BY_ID, BY_ID, BY_ID), trace.queries().stream().map(QueryExecution::sql).toList());
+    }
+
+    @Test
+    void marksRequestsSentByALoadTest() {
+        handle(request(DispatcherType.REQUEST, "/books", "7"), AgentInstrumentationTest::findTitle);
+
+        assertEquals(7, singleTrace().loadTestRun());
+    }
+
+    @Test
+    void ignoresLoadTestHeadersThatAreNoRunNumber() {
+        handle(request(DispatcherType.REQUEST, "/books", "soon"), AgentInstrumentationTest::findTitle);
+
+        assertEquals(UnitTracer.NO_LOAD_TEST, singleTrace().loadTestRun());
     }
 
     @Test
@@ -180,6 +199,7 @@ class AgentInstrumentationTest {
         assertEquals(UnitKind.HTTP, trace.kind());
         assertEquals("/legacy", trace.path());
         assertEquals(201, trace.status());
+        assertEquals(UnitTracer.UNKNOWN_PORT, trace.localPort());
         assertEquals(1, trace.queries().size());
     }
 
@@ -305,7 +325,35 @@ class AgentInstrumentationTest {
             assertEquals(UnitKind.HTTP, trace.kind());
             assertEquals("GET", trace.method());
             assertEquals(204, trace.status());
+            assertEquals(server.getAddress().getPort(), trace.localPort());
             assertEquals(1, trace.queries().size());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void marksEveryRequestALoadTestSends() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.createContext("/shelf", exchange -> {
+            try {
+                findTitle();
+            } catch (SQLException e) {
+                throw new IOException(e);
+            }
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            LoadTester tester = new LoadTester();
+            long run = tester.start(new LoadTestPlan("GET /shelf",
+                    URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/shelf"), 6, 3)).id();
+
+            assertEquals(6, tester.awaitLatest(Duration.ofSeconds(10)).orElseThrow().answered());
+            List<UnitTrace> shelf = awaitTraces("/shelf", 6);
+            assertTrue(shelf.stream().allMatch(trace -> trace.loadTestRun() == run && trace.queries().size() == 1),
+                    shelf.toString());
         } finally {
             server.stop(0);
         }
@@ -409,6 +457,17 @@ class AgentInstrumentationTest {
         throw new AssertionError("No trace of " + path + " in " + TRACES);
     }
 
+    private static List<UnitTrace> awaitTraces(String path, int count) throws InterruptedException {
+        for (int attempt = 0; attempt < 100; attempt++) {
+            List<UnitTrace> found = TRACES.stream().filter(trace -> trace.path().equals(path)).toList();
+            if (found.size() >= count) {
+                return found;
+            }
+            Thread.sleep(50);
+        }
+        throw new AssertionError("Fewer than " + count + " traces of " + path + " in " + TRACES);
+    }
+
     private static void assertEveryCallFitsIn(UnitTrace trace) {
         List<CallNode> nodes = new ArrayList<>(trace.callTree().topLevelCalls());
         assertFalse(nodes.isEmpty(), trace.toString());
@@ -446,6 +505,10 @@ class AgentInstrumentationTest {
     }
 
     private static HttpServletRequest request(DispatcherType dispatcherType, String uri) {
+        return request(dispatcherType, uri, null);
+    }
+
+    private static HttpServletRequest request(DispatcherType dispatcherType, String uri, String loadTestHeader) {
         return (HttpServletRequest) Proxy.newProxyInstance(
                 AgentInstrumentationTest.class.getClassLoader(),
                 new Class<?>[]{HttpServletRequest.class},
@@ -454,6 +517,8 @@ class AgentInstrumentationTest {
                     case "getRequestURI" -> uri;
                     case "getQueryString" -> null;
                     case "getDispatcherType" -> dispatcherType;
+                    case "getLocalPort" -> APP_PORT;
+                    case "getHeader" -> UnitTracer.LOAD_TEST_HEADER.equals(arguments[0]) ? loadTestHeader : null;
                     default -> throw new UnsupportedOperationException(method.getName());
                 });
     }

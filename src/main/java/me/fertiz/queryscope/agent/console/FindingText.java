@@ -12,7 +12,7 @@ import me.fertiz.queryscope.agent.findings.TooManyQueries;
 
 import java.util.Locale;
 
-final class FindingText {
+public final class FindingText {
 
     private static final int MAX_SQL_LENGTH = 160;
 
@@ -27,7 +27,7 @@ final class FindingText {
         return describeWithoutParameters(finding);
     }
 
-    static String describeWithoutParameters(Finding finding) {
+    public static String describeWithoutParameters(Finding finding) {
         return switch (finding.kind()) {
             case N_PLUS_ONE -> {
                 NPlusOne nPlusOne = (NPlusOne) finding;
@@ -82,7 +82,7 @@ final class FindingText {
         };
     }
 
-    static String groupKey(Finding finding, String endpoint) {
+    public static String groupKey(Finding finding, String endpoint) {
         String detail = switch (finding.kind()) {
             case N_PLUS_ONE -> {
                 NPlusOne nPlusOne = (NPlusOne) finding;

@@ -3,7 +3,6 @@ package me.fertiz.queryscope.agent.trace;
 import me.fertiz.queryscope.agent.appcode.CallSites;
 import me.fertiz.queryscope.agent.calltree.CallTracer;
 
-
 import java.sql.ResultSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -12,6 +11,9 @@ import java.util.function.Consumer;
 public final class UnitTracer {
 
     public static final long NO_UNIT = 0;
+    public static final int UNKNOWN_PORT = 0;
+    public static final long NO_LOAD_TEST = 0;
+    public static final String LOAD_TEST_HEADER = "X-QueryScope-Load-Test";
 
     private static final System.Logger LOGGER = System.getLogger("QueryScope");
     private static final ThreadLocal<ActiveUnit> CURRENT = new ThreadLocal<>();
@@ -50,14 +52,26 @@ public final class UnitTracer {
         return current != null && !current.isStartedByQuery();
     }
 
-    public static boolean requestStarted(String method, String uri, String queryString) {
+    public static boolean requestStarted(String method, String uri, String queryString, int localPort,
+                                         String loadTestHeader) {
         if (inRequestOrEntryTask()) {
             return false;
         }
         finishTaskAtLastActivity();
         String path = queryString == null ? uri : uri + "?" + queryString;
-        CURRENT.set(ActiveUnit.http(IDS.incrementAndGet(), method, path));
+        CURRENT.set(ActiveUnit.http(IDS.incrementAndGet(), method, path, localPort, loadTestRunOf(loadTestHeader)));
         return true;
+    }
+
+    static long loadTestRunOf(String header) {
+        if (header == null) {
+            return NO_LOAD_TEST;
+        }
+        try {
+            return Math.max(NO_LOAD_TEST, Long.parseLong(header.trim()));
+        } catch (NumberFormatException e) {
+            return NO_LOAD_TEST;
+        }
     }
 
     public static void requestFinished(int status) {

@@ -628,6 +628,111 @@ tbody tr.selected, tbody tr.selected:hover {
     font-size: 13px;
 }
 
+.load-form {
+    flex-wrap: wrap;
+}
+
+.load-form .select {
+    width: 460px;
+    max-width: 100%;
+}
+
+.load-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.trace-form .load-field .search {
+    width: 90px;
+}
+
+.load-result > * {
+    margin-top: 16px;
+}
+
+.load-result h2 .method {
+    font-size: 14px;
+}
+
+.load-path {
+    font-family: var(--mono);
+    font-weight: 400;
+    word-break: break-all;
+}
+
+.label.load-running {
+    color: var(--blue);
+    background: var(--blue-bg);
+}
+
+.label.load-finished {
+    color: var(--green);
+    background: rgba(129, 201, 149, 0.12);
+}
+
+.label.load-stopped {
+    color: var(--text-2);
+    background: var(--gray-bg);
+}
+
+.progress {
+    height: 4px;
+    margin: 0 20px;
+    border-radius: 2px;
+    background: var(--surface-hover);
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--blue);
+    transition: width 0.3s;
+}
+
+.load-statuses {
+    margin: 0;
+    padding: 12px 20px 16px;
+    color: var(--text-2);
+    font-size: 13px;
+}
+
+.load-facts {
+    padding: 0 20px 16px;
+}
+
+.load-facts .facts {
+    margin: 0;
+}
+
+.load-note {
+    margin: 0;
+    padding: 0 20px 16px;
+    color: var(--yellow);
+    font-size: 13px;
+}
+
+.load-findings {
+    padding: 0 20px 20px;
+}
+
+.load-finding-line {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text-2);
+    font-size: 13px;
+}
+
+.load-finding-example {
+    display: block;
+    margin-top: 8px;
+    color: var(--text);
+    word-break: break-word;
+}
+
 .request-line {
     display: flex;
     align-items: baseline;
