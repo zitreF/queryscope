@@ -1,6 +1,7 @@
 package me.fertiz.queryscope.agent.console;
 
 import me.fertiz.queryscope.agent.findings.Finding;
+import me.fertiz.queryscope.agent.findings.FindingText;
 import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.profiler.Profile;
 import me.fertiz.queryscope.agent.trace.UnitTrace;

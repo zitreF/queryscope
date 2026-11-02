@@ -263,9 +263,9 @@ serves the static panel and a JSON API: the stored reports, their call trees, pr
 stream with one event per finished report. Every SSE client gets its own bounded queue, so a slow browser never holds
 up an application thread.
 
-**For AI assistants.** `AiReport` turns the stored reports, a profile of the last five minutes and the traced methods
-into Markdown, grouping findings the way the session summary does. `/api/report.md` serves it and the panel's
-**Copy for AI** copies it. `McpEndpoint` is a Model Context Protocol server on the Streamable HTTP transport in its
+**For AI assistants.** `AiReport` turns the stored reports, a profile of the last five minutes, the traced methods
+and the last load tests into Markdown, grouping findings the way the session summary does. `/api/report.md` serves
+it and the panel's **Copy for AI** copies it. `McpEndpoint` is a Model Context Protocol server on the Streamable HTTP transport in its
 plainest form: each POST carries one JSON-RPC request and gets one JSON answer, notifications get `202`, and `GET`
 gets `405` because the server never pushes messages. It answers `initialize`, `ping`, `tools/list` and `tools/call`
 for eight tools that wrap the report, the request store, the method tracer and the load tester. A tool that fails answers with
@@ -297,7 +297,7 @@ Everything QueryScope keeps has a limit:
 | Samples                       | 15 minutes, at most 200,000                        |
 | Session summary               | 500 endpoints, 200 distinct findings               |
 | Traced methods                | 20, each with its 50 latest and 10 slowest calls   |
-| Load tests                    | one at a time, the latest kept, 10,000 requests and 50 at once at most |
+| Load tests                    | one at a time, the last 10 kept, 10,000 requests and 50 at once at most |
 | Statements and result sets    | held weakly, gone with the application's objects   |
 
 QueryScope's threads are daemons, so they never keep the application alive: `queryscope-panel-*` for the panel,
@@ -357,9 +357,10 @@ me.fertiz.queryscope.agent             QueryScopeAgent (premain, agentmain), Age
 ├── methodtrace                        tracing chosen methods: MethodTracer, MethodTraceAdvice, MethodTraces,
 │                                      TracedMethod, LatencyHistogram
 ├── loadtest                           LoadTester, LoadTest, LoadTestPlan, LoadTestResult, LoopbackHttp
-├── findings                           QueryAnalyzer, SqlNormalizer, Thresholds, FindingKind and the finding records
+├── findings                           QueryAnalyzer, SqlNormalizer, Thresholds, FindingKind, FindingText and the
+│                                      finding records
 ├── profiler                           Sampling, JfrSampler, ThreadDumpSampler, SampleStore, Profile
-├── console                            ConsoleReporter, SessionSummary, FindingText, AiReport
+├── console                            ConsoleReporter, SessionSummary, AiReport
 ├── panel                              PanelServer, ReportStore, ReportJson, ProfileJson, ProfileQuery,
 │                                      MethodTraceJson, LoadTestJson, LoadTestRequest, McpEndpoint
 ├── hub                                HubServer, LocalProcesses, JavaProcess
@@ -369,8 +370,8 @@ me.fertiz.queryscope.agent             QueryScopeAgent (premain, agentmain), Age
 ```
 
 Dependencies point one way, with no package cycles: `cli` uses `hub`, `http` and `config`; the agent's root package
-uses the feature packages; `panel`, `loadtest`, `console`, `findings` and `trace` build on each other in that order; and
-`appcode`, `http` and `config` (apart from `findings.Thresholds`) depend on nothing else in QueryScope.
+uses the feature packages; `panel`, `console`, `loadtest`, `findings` and `trace` build on each other in that
+order; and `appcode`, `http` and `config` (apart from `findings.Thresholds`) depend on nothing else in QueryScope.
 
 The web pages live in `src/main/resources/me/fertiz/queryscope/agent/web`. The tests mirror the packages, and
 `src/test` also holds the demo shop (`demo`), a plain JDBC program (`plain`), a profiled fixture (`profiled`) and the

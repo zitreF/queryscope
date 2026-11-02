@@ -2,8 +2,11 @@ package me.fertiz.queryscope.agent.console;
 
 import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.findings.Finding;
+import me.fertiz.queryscope.agent.findings.FindingKind;
 import me.fertiz.queryscope.agent.findings.NPlusOne;
 import me.fertiz.queryscope.agent.findings.UnitReport;
+import me.fertiz.queryscope.agent.loadtest.LoadTestPlan;
+import me.fertiz.queryscope.agent.loadtest.LoadTestResult;
 import me.fertiz.queryscope.agent.profiler.Profile;
 import me.fertiz.queryscope.agent.profiler.SampleStore;
 import me.fertiz.queryscope.agent.trace.QueryExecution;
@@ -11,11 +14,13 @@ import me.fertiz.queryscope.agent.trace.UnitKind;
 import me.fertiz.queryscope.agent.trace.UnitTrace;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -65,6 +70,31 @@ class AiReportTest {
     }
 
     @Test
+    void comparesTheLoadTestsNewestFirst() {
+        LoadTestResult.Latency client = new LoadTestResult.Latency(185_000_000, 87_300_000, 738_000_000,
+                1_440_000_000, 1_640_000_000);
+        LoadTestResult naive = new LoadTestResult(1, new LoadTestPlan("GET /api/customers/naive",
+                URI.create("http://127.0.0.1:8080/api/customers/naive?page=2"), 300, 10),
+                LoadTestResult.State.FINISHED, NOW, 5_730_000_000L, 300, 0, null, Map.of(200, 300), client, 300,
+                client, 300 * 41, 41, 41, 300 * 12_700_000L,
+                List.of(new LoadTestResult.FindingCount(FindingKind.N_PLUS_ONE, "N+1: 40 x select", 300)),
+                Map.of(FindingKind.N_PLUS_ONE, 300));
+        LoadTestResult stopped = new LoadTestResult(2, new LoadTestPlan("GET /api/customers/{id}/card",
+                URI.create("http://127.0.0.1:8080/api/customers/7/card"), 1000, 5),
+                LoadTestResult.State.STOPPED, NOW, 1_000_000_000L, 40, 0, null, Map.of(200, 40), client, 40,
+                client, 40 * 3 + 20, 3, 5, 0, List.of(), Map.of());
+
+        String markdown = markdown(List.of(), List.of(stopped, naive));
+
+        assertTrue(markdown.contains("## Load tests, newest first"), markdown);
+        assertTrue(markdown.contains("| `GET /api/customers/7/card` | 40 of 1000, 5 at once, stopped | 40.0 | 87.3 ms"
+                + " | 738.0 ms | 1.44 s | 3 to 5, 3.5 on average | 0.0 ms | - |\n"
+                + "| `GET /api/customers/naive?page=2` | 300 of 300, 10 at once | 52.4 | 87.3 ms | 738.0 ms | 1.44 s | 41"
+                + " | 12.7 ms | N+1 in 300 of 300 |"), markdown);
+        assertFalse(markdown(List.of(), List.of()).contains("Load tests"));
+    }
+
+    @Test
     void listsRequestsNewestFirstWithTheirFindings() {
         List<UnitReport> reports = List.of(
                 report(9, UnitKind.TASK, "TASK", "DigestJob.run", List.of(ORDERS)),
@@ -77,8 +107,12 @@ class AiReportTest {
     }
 
     private String markdown(List<UnitReport> reports) {
+        return markdown(reports, List.of());
+    }
+
+    private String markdown(List<UnitReport> reports, List<LoadTestResult> loadTests) {
         Profile profile = Profile.build(samples, AppPackages.of(List.of("com.acme")), Profile.Filter.allSamples());
-        return AiReport.markdown(reports, List.of("com.acme"), profile, "JDK Flight Recorder", List.of());
+        return AiReport.markdown(reports, List.of("com.acme"), profile, "JDK Flight Recorder", List.of(), loadTests);
     }
 
     private static UnitReport report(long id, UnitKind kind, String method, String path,

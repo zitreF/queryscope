@@ -147,7 +147,7 @@ public final class PanelServer {
         Profile.Filter recent = new Profile.Filter(now - REPORT_WINDOW_MILLIS, now, Profile.Filter.ALL_THREADS, false,
                 false, List.of());
         return AiReport.markdown(store.newestFirst(), application.names(), Profile.build(samples, application, recent),
-                samples.source(), tracer.snapshots());
+                samples.source(), tracer.snapshots(), loadTester.newestFirst());
     }
 
     private void serveTraces(HttpExchange exchange) throws IOException {
@@ -204,7 +204,7 @@ public final class PanelServer {
             return;
         }
         switch (exchange.getRequestMethod()) {
-            case "GET" -> respond(exchange, 200, JSON, LoadTestJson.latestToJson(loadTester.latest()));
+            case "GET" -> respond(exchange, 200, JSON, LoadTestJson.testsToJson(loadTester.newestFirst()));
             case "POST" -> startLoadTest(exchange);
             case "DELETE" -> stopLoadTest(exchange);
             default -> sendStatus(exchange, 405);

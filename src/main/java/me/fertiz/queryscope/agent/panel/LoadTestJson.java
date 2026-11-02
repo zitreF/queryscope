@@ -1,11 +1,14 @@
 package me.fertiz.queryscope.agent.panel;
 
+import me.fertiz.queryscope.agent.findings.FindingKind;
 import me.fertiz.queryscope.agent.http.JsonWriter;
 import me.fertiz.queryscope.agent.loadtest.LoadTestPlan;
 import me.fertiz.queryscope.agent.loadtest.LoadTestResult;
+import me.fertiz.queryscope.agent.loadtest.LoadTester;
 
+import java.util.List;
 import java.util.Locale;
-import java.util.Optional;
+import java.util.Map;
 
 import static me.fertiz.queryscope.agent.panel.ReportJson.toMillis;
 
@@ -14,17 +17,14 @@ final class LoadTestJson {
     private LoadTestJson() {
     }
 
-    static String latestToJson(Optional<LoadTestResult> latest) {
+    static String testsToJson(List<LoadTestResult> newestFirst) {
         JsonWriter json = new JsonWriter().beginObject()
                 .name("maxRequests").value(LoadTestPlan.MAX_REQUESTS)
                 .name("maxConcurrency").value(LoadTestPlan.MAX_CONCURRENCY)
-                .name("test");
-        if (latest.isPresent()) {
-            writeResult(json, latest.get());
-        } else {
-            json.nullValue();
-        }
-        return json.endObject().toString();
+                .name("kept").value(LoadTester.KEPT_TESTS)
+                .name("tests").beginArray();
+        newestFirst.forEach(result -> writeResult(json, result));
+        return json.endArray().endObject().toString();
     }
 
     static String resultToJson(LoadTestResult result) {
@@ -68,6 +68,13 @@ final class LoadTestJson {
                 .name("example").value(finding.example())
                 .name("requests").value(finding.requests())
                 .endObject());
+        json.endArray().name("findingKinds").beginArray();
+        result.requestsByFindingKind().entrySet().stream()
+                .sorted(Map.Entry.<FindingKind, Integer>comparingByValue().reversed())
+                .forEach(kind -> json.beginObject()
+                        .name("type").value(ReportJson.typeOf(kind.getKey()))
+                        .name("requests").value(kind.getValue())
+                        .endObject());
         json.endArray().endObject().endObject();
     }
 

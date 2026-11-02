@@ -25,7 +25,8 @@ public record LoadTestResult(
         int fewestQueries,
         int mostQueries,
         long databaseNanos,
-        List<FindingCount> findings
+        List<FindingCount> findings,
+        Map<FindingKind, Integer> requestsByFindingKind
 ) {
 
     private static final int FIRST_ERROR_STATUS = 400;

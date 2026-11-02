@@ -202,7 +202,9 @@ the request list, the console and the session summary. When a test finishes, the
 QueryScope load test of GET /api/customers/naive finished: 300 of 300 requests answered in 5.73 s (52.4 per second), p50 87.3 ms, p95 738.0 ms, p99 1440.4 ms, 41.0 queries per request
 ```
 
-One test runs at a time, and the panel keeps the latest one.
+One test runs at a time. **Compare tests** lists the last 10 side by side with their requests per second, median, p95,
+queries per request and findings, for example the same endpoint before and after a fix or two ways to load the same
+data; select one to see it in full.
 
 ### Java → Profiler
 
@@ -262,7 +264,7 @@ QueryScope can hand what it saw to an AI assistant, so it can find and fix the s
 
 **Copy for AI** in the panel's header copies a Markdown report: the findings with their SQL, call site and the
 endpoints they were seen in, the endpoints and tasks by time in the database, the hot methods of the last five
-minutes and the traced methods. Paste it into any assistant. The same report is at `GET /api/report.md`, so an
+minutes, the traced methods and the last load tests. Paste it into any assistant. The same report is at `GET /api/report.md`, so an
 assistant that runs commands can read it with `curl -s localhost:7070/api/report.md`.
 
 **MCP.** The panel is also a [Model Context Protocol](https://modelcontextprotocol.io) server at `/mcp`, over the
@@ -417,7 +419,7 @@ The panel is backed by a small JSON API on the same port:
 | `GET /api/traces`              | the traced methods with their counts, percentiles, slowest and latest calls           |
 | `POST /api/traces`             | starts tracing the method in a body like `{"method": "com.acme.OrderService#findAll"}` |
 | `DELETE /api/traces/{method}`  | stops tracing it, named as `com.acme.OrderService.findAll`                            |
-| `GET /api/load-tests`          | the latest load test, or `null`, with the limits on requests and concurrency          |
+| `GET /api/load-tests`          | the last 10 load tests, newest first, with the limits on requests and concurrency     |
 | `POST /api/load-tests`         | starts a load test with a body like `{"id": 17, "requests": 100, "concurrency": 10}`  |
 | `DELETE /api/load-tests`       | stops the running load test                                                           |
 | `GET /api/report.md`           | the report for AI assistants in Markdown                                              |

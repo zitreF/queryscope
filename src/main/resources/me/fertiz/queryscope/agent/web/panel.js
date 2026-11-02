@@ -143,6 +143,7 @@ const state = {
         loadedAt: 0,
         requestId: null,
         path: null,
+        selectedId: null,
     },
     windowMs: WINDOWS[0].ms,
     renderedRequestId: undefined,
@@ -1441,7 +1442,7 @@ function updateLoadButtons() {
 }
 
 function isLoadTestRunning() {
-    return state.loadTest.data?.test?.state === 'running';
+    return state.loadTest.data?.tests?.[0]?.state === 'running';
 }
 
 async function startLoadTest() {
@@ -1460,7 +1461,9 @@ async function startLoadTest() {
         if (!response.ok) {
             throw new Error(result.error || `the panel answered ${response.status}`);
         }
-        state.loadTest.data = {...state.loadTest.data, test: result};
+        const earlier = (state.loadTest.data?.tests ?? []).filter(test => test.id !== result.id);
+        state.loadTest.data = {...state.loadTest.data, tests: [result, ...earlier]};
+        state.loadTest.selectedId = null;
         state.loadTest.loadedAt = Date.now();
         renderLoadTest();
     } catch (error) {
@@ -1499,10 +1502,11 @@ async function loadLoadTest() {
     if (data === null) {
         return;
     }
-    const previous = loadTest.data?.test;
+    const previous = loadTest.data?.tests?.[0];
     loadTest.data = data;
-    if (previous?.state === 'running' && data.test?.id === previous.id && data.test.state !== 'running') {
-        announceLoadTest(data.test);
+    const current = data.tests.find(test => test.id === previous?.id);
+    if (previous?.state === 'running' && current && current.state !== 'running') {
+        announceLoadTest(current);
     }
     renderLoadTest();
 }
@@ -1522,21 +1526,21 @@ function announceLoadTest(test) {
 
 function renderLoadTest() {
     updateLoadButtons();
-    const test = state.loadTest.data?.test;
+    const tests = state.loadTest.data?.tests ?? [];
+    const test = tests.find(candidate => candidate.id === state.loadTest.selectedId) ?? tests[0];
     if (!test) {
         byId('load-result').replaceChildren(createElement('section', {class: 'panel'},
             createElement('p', {class: 'empty', style: {paddingTop: '20px'}},
                 'No load test yet. Pick a GET request above, or press Load test in the details of one.')));
         return;
     }
-    const target = new URL(test.target);
     const done = test.answered + test.failed;
     byId('load-result').replaceChildren(
         createElement('section', {class: 'panel'},
             createElement('div', {class: 'panel-header'},
                 createElement('div', {},
                     createElement('h2', {}, createElement('span', {class: 'method'}, 'GET'),
-                        createElement('span', {class: 'load-path'}, target.pathname + target.search)),
+                        createElement('span', {class: 'load-path'}, loadTestPath(test))),
                     createElement('p', {class: 'panel-hint'}, `${formatCount(test.requests)} requests, `
                         + `${test.concurrency} at once, started ${new Date(parseInstant(test.startedAt)).toLocaleTimeString()}`
                         + ` · ${test.endpoint}`)),
@@ -1545,7 +1549,64 @@ function renderLoadTest() {
                 createElement('div', {class: 'progress-fill', style: {width: cssPercent(done / test.requests)}})),
             createElement('p', {class: 'load-statuses'}, createLoadStatusLine(test))),
         createLoadKpis(test),
-        createLoadServerPanel(test));
+        createLoadServerPanel(test),
+        tests.length > 1 ? createLoadHistory(tests, test) : null);
+}
+
+function createLoadHistory(tests, shown) {
+    const table = createTable(
+        [
+            {title: 'Request', width: 'auto'},
+            {title: 'Started', width: '110px'},
+            {title: 'Requests', width: '150px', number: true},
+            {title: 'Per second', width: '110px', number: true},
+            {title: 'Median', width: '100px', number: true},
+            {title: 'p95', width: '100px', number: true},
+            {title: 'Queries per request', width: '160px', number: true},
+            {title: 'Findings', width: '22%'},
+        ],
+        tests.map(test => createElement('tr', {
+                class: `clickable${test.id === shown.id ? ' selected' : ''}`,
+                onclick: () => {
+                    state.loadTest.selectedId = test.id;
+                    renderLoadTest();
+                },
+            },
+            createElement('td', {class: 'ellipsis', title: test.target}, createElement('code', {}, loadTestPath(test))),
+            createElement('td', {}, new Date(parseInstant(test.startedAt)).toLocaleTimeString()),
+            createElement('td', {class: 'number'}, test.state === 'finished'
+                ? `${formatCount(test.requests)}, ${test.concurrency} at once`
+                : `${formatCount(test.answered + test.failed)} of ${formatCount(test.requests)}, ${test.state}`),
+            createElement('td', {class: 'number'}, test.answered > 0 ? formatRate(test.requestsPerSecond) : '—'),
+            createElement('td', {class: 'number'}, test.answered > 0 ? formatMs(test.latency.p50Ms) : '—'),
+            createElement('td', {class: 'number'}, test.answered > 0 ? formatMs(test.latency.p95Ms) : '—'),
+            createElement('td', {class: 'number'}, loadTestQueries(test.server)),
+            createElement('td', {}, test.server.findingKinds.length === 0 ? '—' : test.server.findingKinds.map(kind =>
+                createElement('span', {
+                    class: `label ${FINDING_TYPES[kind.type]?.css ?? ''}`,
+                    title: `In ${formatCount(kind.requests)} of ${formatCount(test.server.tracedRequests)} requests`,
+                }, FINDING_TYPES[kind.type]?.name ?? kind.type))))));
+    table.classList.add('call-table');
+    return createElement('section', {class: 'panel'},
+        createElement('div', {class: 'panel-header'}, createElement('div', {},
+            createElement('h2', {}, 'Compare tests'),
+            createElement('p', {class: 'panel-hint'},
+                `The last ${state.loadTest.data.kept} tests, newest first. Select one to see it above.`))),
+        table);
+}
+
+function loadTestPath(test) {
+    const target = new URL(test.target);
+    return target.pathname + target.search;
+}
+
+function loadTestQueries(server) {
+    if (server.tracedRequests === 0) {
+        return '—';
+    }
+    return server.fewestQueries === server.mostQueries
+        ? formatCount(server.fewestQueries)
+        : `${formatCount(server.fewestQueries)} to ${formatCount(server.mostQueries)}`;
 }
 
 function loadTestStateText(test, done) {
@@ -1597,13 +1658,10 @@ function createLoadServerPanel(test) {
     if (traced === 0) {
         return createElement('section', {class: 'panel'}, header);
     }
-    const queries = server.fewestQueries === server.mostQueries
-        ? formatCount(server.fewestQueries)
-        : `${formatCount(server.fewestQueries)} to ${formatCount(server.mostQueries)}`;
     return createElement('section', {class: 'panel'},
         header,
         createElement('div', {class: 'load-facts'}, createElement('dl', {class: 'facts'},
-            createFact('Queries per request', queries),
+            createFact('Queries per request', loadTestQueries(server)),
             createFact('Time in database', `${formatMs(server.averageDatabaseMs)} on average`),
             createFact('Median in the app', formatMs(server.latency.p50Ms)),
             createFact('p95 in the app', formatMs(server.latency.p95Ms)),

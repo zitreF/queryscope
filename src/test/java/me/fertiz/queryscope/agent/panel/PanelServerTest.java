@@ -199,7 +199,8 @@ class PanelServerTest {
         assertEquals(400, postJson("/api/load-tests", "[1]", null).statusCode());
         assertEquals(403, postJson("/api/load-tests", "{\"id\": 1}", "http://attacker.example").statusCode());
         assertEquals(404, delete("/api/load-tests").statusCode());
-        assertEquals("{\"maxRequests\":10000,\"maxConcurrency\":50,\"test\":null}", get("/api/load-tests").body());
+        assertEquals("{\"maxRequests\":10000,\"maxConcurrency\":50,\"kept\":10,\"tests\":[]}",
+                get("/api/load-tests").body());
     }
 
     @Test

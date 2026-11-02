@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.ConnectException;
 import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
@@ -22,6 +23,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
+import java.util.stream.LongStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -101,6 +103,7 @@ class LoadTesterTest {
         assertEquals(FindingKind.N_PLUS_ONE, nPlusOne.kind());
         assertEquals(10, nPlusOne.requests());
         assertTrue(nPlusOne.example().startsWith("N+1: "), nPlusOne.example());
+        assertEquals(Map.of(FindingKind.N_PLUS_ONE, 10), result.requestsByFindingKind());
     }
 
     @Test
@@ -155,6 +158,19 @@ class LoadTesterTest {
         assertTrue(tester.sent(report(1, 0, false).trace()));
         assertFalse(tester.sent(report(0, 0, false).trace()));
         assertFalse(tester.sent(report(2, 0, false).trace()));
+    }
+
+    @Test
+    void keepsTheLatestTestsNewestFirst() throws Exception {
+        LoadTester tester = tester((target, run) -> 200);
+
+        for (int test = 0; test < LoadTester.KEPT_TESTS + 2; test++) {
+            tester.start(plan(1, 1));
+            tester.awaitLatest(Duration.ofSeconds(10));
+        }
+
+        assertEquals(LongStream.rangeClosed(3, 12).map(id -> 15 - id).boxed().toList(),
+                tester.newestFirst().stream().map(LoadTestResult::id).toList());
     }
 
     @Test

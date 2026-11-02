@@ -1,14 +1,16 @@
 package me.fertiz.queryscope.agent.loadtest;
 
-import me.fertiz.queryscope.agent.console.FindingText;
 import me.fertiz.queryscope.agent.findings.Finding;
 import me.fertiz.queryscope.agent.findings.FindingKind;
+import me.fertiz.queryscope.agent.findings.FindingText;
 import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.trace.UnitTrace;
 
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -30,6 +32,7 @@ final class LoadTest {
     private final long[] serverNanos;
     private final Map<Integer, Integer> statuses = new TreeMap<>();
     private final Map<String, FindingTally> findings = new LinkedHashMap<>();
+    private final Map<FindingKind, Integer> requestsByFindingKind = new EnumMap<>(FindingKind.class);
     private volatile boolean stopRequested;
     private LoadTestResult.State state = LoadTestResult.State.RUNNING;
     private long sendingNanos = STILL_SENDING;
@@ -93,13 +96,16 @@ final class LoadTest {
         queries += count;
         databaseNanos += trace.databaseNanos();
         Set<String> counted = new HashSet<>();
+        Set<FindingKind> kinds = EnumSet.noneOf(FindingKind.class);
         for (Finding finding : report.findings()) {
             String key = FindingText.groupKey(finding, trace.endpoint());
             if (counted.add(key)) {
                 findings.computeIfAbsent(key, ignored -> new FindingTally(finding.kind(),
                         FindingText.describeWithoutParameters(finding))).requests++;
             }
+            kinds.add(finding.kind());
         }
+        kinds.forEach(kind -> requestsByFindingKind.merge(kind, 1, Integer::sum));
         notifyAll();
     }
 
@@ -140,7 +146,8 @@ final class LoadTest {
                 findings.values().stream()
                         .sorted(Comparator.comparingInt((FindingTally tally) -> tally.requests).reversed())
                         .map(tally -> new LoadTestResult.FindingCount(tally.kind, tally.example, tally.requests))
-                        .toList());
+                        .toList(),
+                new EnumMap<>(requestsByFindingKind));
     }
 
     private synchronized void answered(int status, long nanos) {

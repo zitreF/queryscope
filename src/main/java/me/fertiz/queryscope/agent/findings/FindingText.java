@@ -1,14 +1,6 @@
-package me.fertiz.queryscope.agent.console;
+package me.fertiz.queryscope.agent.findings;
 
 import me.fertiz.queryscope.agent.appcode.CallSites;
-import me.fertiz.queryscope.agent.findings.DuplicateQuery;
-import me.fertiz.queryscope.agent.findings.Finding;
-import me.fertiz.queryscope.agent.findings.LargeResult;
-import me.fertiz.queryscope.agent.findings.NPlusOne;
-import me.fertiz.queryscope.agent.findings.RepeatedWrite;
-import me.fertiz.queryscope.agent.findings.SlowMethod;
-import me.fertiz.queryscope.agent.findings.SlowQuery;
-import me.fertiz.queryscope.agent.findings.TooManyQueries;
 
 import java.util.Locale;
 
@@ -19,7 +11,7 @@ public final class FindingText {
     private FindingText() {
     }
 
-    static String describe(Finding finding) {
+    public static String describe(Finding finding) {
         if (finding instanceof DuplicateQuery duplicate) {
             return String.format(Locale.ROOT, "Duplicate query: %d x %s with %s%s", duplicate.executions(),
                     shorten(duplicate.normalizedSql()), duplicate.parameters(), atCallSite(duplicate.callSite()));
@@ -70,8 +62,12 @@ public final class FindingText {
         };
     }
 
-    static String badge(Finding finding) {
-        return switch (finding.kind()) {
+    public static String badge(Finding finding) {
+        return badge(finding.kind());
+    }
+
+    public static String badge(FindingKind kind) {
+        return switch (kind) {
             case N_PLUS_ONE -> "N+1";
             case REPEATED_WRITE -> "Writes";
             case DUPLICATE_QUERY -> "Duplicate";
@@ -110,7 +106,7 @@ public final class FindingText {
         return finding.kind() + "|" + detail;
     }
 
-    static double toMillis(long nanos) {
+    public static double toMillis(long nanos) {
         return nanos / 1_000_000.0;
     }
 

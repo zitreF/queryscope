@@ -6,6 +6,9 @@ import me.fertiz.queryscope.agent.trace.UnitTrace;
 import me.fertiz.queryscope.agent.trace.UnitTracer;
 
 import java.time.Duration;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -13,6 +16,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 public final class LoadTester {
+
+    public static final int KEPT_TESTS = 10;
 
     private static final System.Logger LOGGER = System.getLogger("QueryScope");
     private static final String THREAD_NAME = CallSites.THREAD_NAME_PREFIX + "load-test-";
@@ -22,6 +27,7 @@ public final class LoadTester {
     private final Consumer<LoadTestResult> onFinish;
     private final long serverSideWaitNanos;
     private final AtomicLong runs = new AtomicLong();
+    private final Deque<LoadTest> kept = new ArrayDeque<>();
     private volatile LoadTest latest;
 
     public LoadTester() {
@@ -43,6 +49,10 @@ public final class LoadTester {
         }
         LoadTest test = new LoadTest(runs.incrementAndGet(), plan);
         latest = test;
+        kept.addFirst(test);
+        if (kept.size() > KEPT_TESTS) {
+            kept.removeLast();
+        }
         AtomicInteger working = new AtomicInteger(plan.workers());
         for (int worker = 1; worker <= plan.workers(); worker++) {
             Thread thread = new Thread(() -> sendAndFinish(test, working), THREAD_NAME + test.id() + "-" + worker);
@@ -60,6 +70,10 @@ public final class LoadTester {
     public Optional<LoadTestResult> latest() {
         LoadTest test = latest;
         return test == null ? Optional.empty() : Optional.of(test.result());
+    }
+
+    public synchronized List<LoadTestResult> newestFirst() {
+        return kept.stream().map(LoadTest::result).toList();
     }
 
     public Optional<LoadTestResult> awaitLatest(Duration timeout) throws InterruptedException {

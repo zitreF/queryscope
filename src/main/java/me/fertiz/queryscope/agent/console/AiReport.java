@@ -1,7 +1,10 @@
 package me.fertiz.queryscope.agent.console;
 
 import me.fertiz.queryscope.agent.findings.Finding;
+import me.fertiz.queryscope.agent.findings.FindingKind;
+import me.fertiz.queryscope.agent.findings.FindingText;
 import me.fertiz.queryscope.agent.findings.UnitReport;
+import me.fertiz.queryscope.agent.loadtest.LoadTestResult;
 import me.fertiz.queryscope.agent.methodtrace.TracedMethod;
 import me.fertiz.queryscope.agent.profiler.Profile;
 import me.fertiz.queryscope.agent.trace.UnitKind;
@@ -27,7 +30,8 @@ public final class AiReport {
     }
 
     public static String markdown(List<UnitReport> newestFirst, List<String> packages, Profile profile,
-                                  String sampleSource, List<TracedMethod.Snapshot> traces) {
+                                  String sampleSource, List<TracedMethod.Snapshot> traces,
+                                  List<LoadTestResult> loadTests) {
         StringBuilder out = new StringBuilder("# QueryScope report\n\n");
         out.append(packages.isEmpty()
                         ? "QueryScope could not tell the application's packages, so it knows no code as yours."
@@ -39,6 +43,7 @@ public final class AiReport {
         writeEndpoints(out, newestFirst);
         writeHotMethods(out, profile, sampleSource);
         writeTraces(out, traces);
+        writeLoadTests(out, loadTests);
         return out.toString();
     }
 
@@ -158,6 +163,53 @@ public final class AiReport {
                     .append(" | ").append(SessionSummary.formatDuration(trace.p95Nanos()))
                     .append(" | ").append(SessionSummary.formatDuration(trace.maxNanos())).append(" |\n");
         }
+    }
+
+    private static void writeLoadTests(StringBuilder out, List<LoadTestResult> loadTests) {
+        if (loadTests.isEmpty()) {
+            return;
+        }
+        out.append("\n## Load tests, newest first\n\nEach test sent one GET request again and again from inside the ")
+                .append("application's JVM. Requests per second and the percentiles are what the sender saw; queries, ")
+                .append("time in the database and findings come from QueryScope's traces of the same requests.\n\n")
+                .append("| Request | Sent | Per second | Median | p95 | p99 | Queries per request | Time in database")
+                .append(" | Findings |\n|---|---|---|---|---|---|---|---|---|\n");
+        for (LoadTestResult test : loadTests) {
+            out.append("| `GET ").append(tableCell(test.plan().path())).append("` | ").append(test.answered())
+                    .append(" of ").append(test.plan().requests()).append(", ").append(test.plan().concurrency())
+                    .append(" at once").append(test.state() == LoadTestResult.State.FINISHED ? ""
+                            : ", " + test.state().name().toLowerCase(Locale.ROOT))
+                    .append(" | ").append(String.format(Locale.ROOT, "%.1f", test.requestsPerSecond()))
+                    .append(" | ").append(SessionSummary.formatDuration(test.client().p50Nanos()))
+                    .append(" | ").append(SessionSummary.formatDuration(test.client().p95Nanos()))
+                    .append(" | ").append(SessionSummary.formatDuration(test.client().p99Nanos()))
+                    .append(" | ").append(queriesText(test))
+                    .append(" | ").append(test.tracedRequests() == 0 ? "-"
+                            : SessionSummary.formatDuration(test.averageDatabaseNanos()))
+                    .append(" | ").append(findingKindsText(test))
+                    .append(" |\n");
+        }
+    }
+
+    private static String findingKindsText(LoadTestResult test) {
+        if (test.requestsByFindingKind().isEmpty()) {
+            return "-";
+        }
+        return String.join(", ", test.requestsByFindingKind().entrySet().stream()
+                .sorted(Map.Entry.<FindingKind, Integer>comparingByValue().reversed())
+                .map(kind -> FindingText.badge(kind.getKey()) + " in " + kind.getValue() + " of "
+                        + test.tracedRequests())
+                .toList());
+    }
+
+    private static String queriesText(LoadTestResult test) {
+        if (test.tracedRequests() == 0) {
+            return "-";
+        }
+        return test.fewestQueries() == test.mostQueries()
+                ? String.valueOf(test.fewestQueries())
+                : String.format(Locale.ROOT, "%d to %d, %.1f on average", test.fewestQueries(), test.mostQueries(),
+                        test.averageQueries());
     }
 
     private static String percent(int part, double whole) {

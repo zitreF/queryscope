@@ -1,9 +1,10 @@
 package me.fertiz.queryscope.agent.console;
 
 import me.fertiz.queryscope.agent.findings.Finding;
+import me.fertiz.queryscope.agent.findings.FindingText;
 import me.fertiz.queryscope.agent.findings.UnitReport;
-import me.fertiz.queryscope.agent.trace.UnitTrace;
 import me.fertiz.queryscope.agent.trace.UnitKind;
+import me.fertiz.queryscope.agent.trace.UnitTrace;
 
 import java.util.Locale;
 

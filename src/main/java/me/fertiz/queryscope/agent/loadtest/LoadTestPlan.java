@@ -44,6 +44,10 @@ public record LoadTestPlan(String endpoint, URI target, int requests, int concur
         return Math.min(requests, concurrency);
     }
 
+    public String path() {
+        return target.getRawQuery() == null ? target.getRawPath() : target.getRawPath() + "?" + target.getRawQuery();
+    }
+
     private static URI loopbackTarget(int port, String path) {
         URI target;
         try {
