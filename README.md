@@ -18,6 +18,9 @@
 
 ## Start
 
+Download `queryscope.jar` from the [latest release](https://github.com/zitreF/queryscope/releases/latest). It runs on
+Java 17 and newer.
+
 ```bash
 java -jar queryscope.jar                          # pick a running Java app in the browser and attach to it
 java -jar queryscope.jar your-app.jar             # or start your app with QueryScope from its first line
@@ -84,6 +87,8 @@ Then press **Load test** on `/api/customers/naive` and on `/api/customers/optimi
 several times more requests per second, with 1 query per request instead of 41. A load test of
 `POST /api/reports/visits` with 5 requests at once shows the bug no single request does: some answer 500, because
 the service picks its next id with `select max(id) + 1` and parallel requests pick the same one.
+
+![QueryScope load test of the N+1 endpoint, compared with the optimized one](docs/panel-load-test.png)
 
 ## Example: finding and fixing an N+1
 

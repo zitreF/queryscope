@@ -25,6 +25,8 @@ the JSON API and what to do when something does not work. For the internals, see
 
 ## Getting the agent
 
+Download `queryscope.jar` from the [latest release](https://github.com/zitreF/queryscope/releases/latest), or build it:
+
 ```bash
 git clone https://github.com/zitreF/queryscope.git
 cd queryscope
@@ -184,6 +186,8 @@ view.
 
 ### SQL → Load test
 
+![SQL Load test view with two tests compared](panel-load-test.png)
+
 A load test sends a request the app already served again and again and shows how the endpoint holds up. Pick
 the request in the view, or press **Load test** in the details of a request or a call tree, choose how many requests
 to send (up to 10,000) and how many at once (up to 50), and press **Start**. The numbers update every second, and
@@ -249,6 +253,13 @@ requests and tasks that ran your code, also those without any SQL. The details s
   matter expanded. Methods that were already running when a task started are marked *already running*;
 - *Queries of a method*: click a method with queries to see its SQL;
 - *Methods by self time*: the methods that kept the request busy, summed over all their calls.
+
+Work that a request hands to other threads, such as `CompletableFuture`s, executor tasks, virtual threads and
+parallel streams, sits under **(async tasks)** in the request that started it, with the calls of all its tasks merged
+by method. The demo's dashboard loads the total of every order on a thread pool, and the 7 queries of
+`CustomerDashboardService.totalOf` show up there:
+
+![Java call tree with the async tasks of a request](panel-async.png)
 
 **CPU samples** opens the profiler for the request, **SQL queries** opens it in the SQL area.
 
