@@ -264,8 +264,8 @@ QueryScope can hand what it saw to an AI assistant, so it can find and fix the s
 
 **Copy for AI** in the panel's header copies a Markdown report: the findings with their SQL, call site and the
 endpoints they were seen in, the endpoints and tasks by time in the database, the hot methods of the last five
-minutes, the traced methods and the last load tests. Paste it into any assistant. The same report is at `GET /api/report.md`, so an
-assistant that runs commands can read it with `curl -s localhost:7070/api/report.md`.
+minutes, the traced methods and the last load tests. Paste it into any assistant. The same report is at
+`GET /api/report.md`, so an assistant that runs commands can read it with `curl -s localhost:7070/api/report.md`.
 
 **MCP.** The panel is also a [Model Context Protocol](https://modelcontextprotocol.io) server at `/mcp`, over the
 Streamable HTTP transport, so an assistant can ask QueryScope itself while the app runs. In Claude Code:
@@ -335,13 +335,14 @@ after the jar path, separated by commas: `-javaagent:queryscope.jar=port=9090,sl
 | `slowMethodMs`      | `100`      | Methods spending at least this long in their own code are reported      |
 | `package`           | main class | Package whose methods form the call tree and count as your code, can be repeated |
 | `callTree`          | `true`     | Records the call tree of your methods, also accepted as `profile`       |
+| `async`             | `true`     | Counts the queries of async tasks in the request or task that started them |
 | `sampling`          | `true`     | Runs the sampling profiler                                              |
 | `sampleMs`          | `10`       | How often the profiler takes a sample, from 1 to 1000 ms                |
 | `entry`             | none       | `Class#method` whose whole call becomes one task, can be repeated       |
 | `trace`             | none       | `Class#method` whose every call is recorded, can be repeated            |
 | `attach`            | none       | Hub only: attaches to this process ID and exits                         |
 
-`open`, `summary`, `callTree` and `sampling` work without a value, so `--open` means `--open=true`. An unknown option or
+`open`, `summary`, `callTree`, `async` and `sampling` work without a value, so `--open` means `--open=true`. An unknown option or
 an invalid value stops QueryScope at startup with a message that names it. Anything else that fails at startup, such as
 a runtime built without the `jdk.httpserver` or `java.sql` module, is logged and the application runs on without
 QueryScope or without its panel. When 7070 is taken, for example by the hub, the panel and the hub move to a free port
@@ -496,8 +497,11 @@ production.
 
 ## Limitations
 
-- Queries a request runs on another thread (`DeferredResult`, `@Async`, `CompletableFuture`) show up as separate tasks
-  rather than as part of the request.
+- Async tasks are followed through `ThreadPoolExecutor`, `ForkJoinPool` (with `CompletableFuture` and parallel
+  streams) and everything built on them, such as Spring's `@Async` and `ThreadPoolTaskExecutor`. Work handed to a new
+  `Thread`, a virtual thread or a `ScheduledExecutorService` shows up as separate tasks. A request waits at most a
+  second for its async tasks after it returns; a task that runs longer, such as one finishing a `DeferredResult`,
+  shows up on its own as `Async from GET /path`.
 - Reactive stacks are not covered: WebFlux and Vert.x requests are not recognized, and R2DBC is not JDBC.
 - HTTP servers that are neither servlet containers nor the JDK's `HttpServer`, such as Netty, are not recognized as
   requests. Their queries still show up as tasks.

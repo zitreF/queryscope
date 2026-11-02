@@ -2,6 +2,7 @@ package me.fertiz.queryscope.e2e;
 
 import me.fertiz.queryscope.demo.DemoApplication;
 import me.fertiz.queryscope.demo.customer.CustomerController;
+import me.fertiz.queryscope.demo.customer.CustomerDashboardService;
 import me.fertiz.queryscope.demo.customer.CustomerService;
 import me.fertiz.queryscope.demo.customer.CustomerSummary;
 import me.fertiz.queryscope.demo.report.RevenueSheetService;
@@ -157,6 +158,22 @@ class QueryScopeEndToEndTest {
         assertEquals(2, finding.path("executions").asInt());
         assertTrue(finding.path("callSite").asString()
                 .startsWith("me.fertiz.queryscope.demo.customer.CustomerCardService.nameOf("), finding.toString());
+    }
+
+    @Test
+    void countsQueriesOfAsyncTasksInTheRequestThatStartedThem() throws Exception {
+        JsonNode report = requestAndReport("/api/customers/7/dashboard");
+
+        assertEquals(8, report.path("queries").size());
+        JsonNode finding = finding(report, "nPlusOne");
+        assertEquals(7, finding.path("executions").asInt());
+        assertTrue(finding.path("callSite").asString()
+                .startsWith("me.fertiz.queryscope.demo.customer.CustomerDashboardService.totalOf("), finding.toString());
+        JsonNode calls = JSON.readTree(get(panelPort, "/api/requests/" + report.path("id").asLong() + "/calls").body());
+        JsonNode async = method(calls.path("methods"), "(async tasks)");
+        assertEquals(7, async.path("calls").asInt());
+        assertEquals(7, method(async.path("children"), CustomerDashboardService.class.getName() + ".totalOf")
+                .path("queryIndexes").size());
     }
 
     @Test

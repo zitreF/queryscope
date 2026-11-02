@@ -35,6 +35,8 @@ prints a summary of the session. The [usage guide](docs/usage.md) has the detail
 - **Slow code**: methods that spend their time in Java rather than in the database, with warm-up left out.
 - **A call tree of your methods** for every request and task, with the queries each method ran, so an N+1 points at
   the method that loops.
+- **Async work in its request**: queries of `@Async` methods, `CompletableFuture`s, executor tasks and parallel
+  streams count in the request that started them, so an N+1 spread over a thread pool is still one N+1.
 - **A sampling profiler** on JDK Flight Recorder that sees every method of any Java program, your code, libraries and
   the JDK, as a flame graph for the whole app, one thread, one request or one endpoint.
 - **Method tracing on demand**: pick any method of your code or a library while the app runs and see every call, its
@@ -72,6 +74,7 @@ On Windows use `gradlew.bat`. Open the panel at http://localhost:7070 and call t
 | http://localhost:8080/api/reports/recent-returns    | loads every return event and keeps the 20 newest in memory          | 50,000 rows             |
 | `curl -X POST localhost:8080/api/reports/visits`    | inserts 20 events one statement at a time                           | 20 unbatched writes     |
 | http://localhost:8080/api/reports/daily-revenue     | builds a year of daily revenue as CSV with `+=` in a loop           | slow method             |
+| http://localhost:8080/api/customers/7/dashboard     | loads each order's total with `CompletableFuture` on a thread pool  | N+1 ×7 across threads   |
 
 A scheduled job builds the same naive summaries every 30 seconds outside any HTTP request and shows up as the task
 `DigestJob.prepareDigest`, and the data loaded at startup shows up as `DemoApplication.main`.

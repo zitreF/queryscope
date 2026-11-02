@@ -21,6 +21,7 @@ public final class UnitTracer {
     private static final AtomicInteger OPEN_TASKS = new AtomicInteger();
     private static final WeakIdentityMap<BoundStatement> STATEMENTS = new WeakIdentityMap<>();
     private static final WeakIdentityMap<LiveQuery> RESULTS = new WeakIdentityMap<>();
+    private static final WeakIdentityMap<PendingTask> ASYNC_TASKS = new WeakIdentityMap<>();
     private static final int NO_STATUS = 0;
 
     private static volatile Consumer<UnitTrace> listener = trace -> {
@@ -89,6 +90,49 @@ public final class UnitTracer {
 
     public static void taskFinished() {
         finishCurrentUnit(NO_STATUS);
+    }
+
+    static ActiveUnit asyncOwnerOfThisThread() {
+        ActiveUnit current = CURRENT.get();
+        return current == null || current.isStartedByQuery() ? null : current.owner();
+    }
+
+    static void asyncTaskSubmitted(Object task, ActiveUnit owner) {
+        ASYNC_TASKS.put(task, new PendingTask(owner, owner.attachAsyncTask()));
+    }
+
+    static boolean asyncTaskStarted(Object task) {
+        if (ASYNC_TASKS.isEmpty()) {
+            return false;
+        }
+        PendingTask pending = ASYNC_TASKS.remove(task);
+        if (pending == null) {
+            return false;
+        }
+        if (inRequestOrEntryTask()) {
+            if (pending.counted()) {
+                pending.owner().attachedTaskEnded(null, 0).forEach(UnitTracer::publish);
+            }
+            return false;
+        }
+        finishTaskAtLastActivity();
+        CURRENT.set(ActiveUnit.asyncTask(IDS.incrementAndGet(), pending.owner(), task, pending.counted()));
+        return true;
+    }
+
+    static void asyncTaskFinished(Object task) {
+        ActiveUnit current = CURRENT.get();
+        if (current == null || !current.runs(task)) {
+            return;
+        }
+        CURRENT.remove();
+        UnitTrace trace = current.finish(NO_STATUS, System.nanoTime());
+        UnitTrace kept = trace.queryCount() == 0 && trace.callTree().topLevelCalls().isEmpty() ? null : trace;
+        if (current.countsForOwner()) {
+            current.owner().attachedTaskEnded(kept, current.startedNanos()).forEach(UnitTracer::publish);
+        } else if (kept != null) {
+            publish(kept);
+        }
     }
 
     public static void statementPrepared(Object statement, String sql) {
@@ -200,7 +244,23 @@ public final class UnitTracer {
         if (unit.isStartedByQuery()) {
             OPEN_TASKS.decrementAndGet();
         }
-        UnitTrace trace = unit.finish(status, endNanos);
+        UnitTrace ready = unit.publishableTrace(unit.finish(status, endNanos));
+        if (ready != null) {
+            publish(ready);
+        } else {
+            AsyncWait.later(() -> {
+                UnitTrace late = unit.asyncWaitEnded();
+                if (late != null) {
+                    publish(late);
+                }
+            });
+        }
+    }
+
+    private record PendingTask(ActiveUnit owner, boolean counted) {
+    }
+
+    private static void publish(UnitTrace trace) {
         try {
             listener.accept(trace);
         } catch (RuntimeException e) {

@@ -14,6 +14,7 @@ import me.fertiz.queryscope.agent.config.AgentConfig;
 import me.fertiz.queryscope.agent.AgentInstaller;
 import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.calltree.CallNode;
+import me.fertiz.queryscope.agent.calltree.CallTree;
 import me.fertiz.queryscope.agent.findings.QueryAnalyzer;
 import me.fertiz.queryscope.agent.findings.TooManyQueries;
 import me.fertiz.queryscope.agent.http.HttpSupport;
@@ -51,7 +52,14 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -74,6 +82,7 @@ class AgentInstrumentationTest {
         AgentInstaller.install(instrumentation, List.of(ImportJob.class.getName() + "#run"),
                 AppPackages.of(List.of(BookCatalog.class.getPackageName())));
         AgentInstaller.installJdkHttpServerHook(instrumentation);
+        AgentInstaller.installAsyncHooks(instrumentation);
         UnitTracer.publishTo(TRACES::add);
 
         HikariConfig config = new HikariConfig();
@@ -189,6 +198,114 @@ class AgentInstrumentationTest {
         UnitTrace trace = singleTrace();
         assertEquals("/outer", trace.path());
         assertEquals(2, trace.queries().size());
+    }
+
+    @Test
+    void countsTheQueriesOfTasksARequestSubmitsToAnExecutor() throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            handle(request(DispatcherType.REQUEST, "/books"), () -> {
+                findTitle();
+                pool.submit(AgentInstrumentationTest::findTitleQuietly).get();
+                pool.invokeAll(List.of(() -> findTitleQuietly(), () -> findTitleQuietly()));
+            });
+        } finally {
+            pool.shutdownNow();
+        }
+
+        UnitTrace trace = awaitSingleTrace();
+        assertEquals(UnitKind.HTTP, trace.kind());
+        assertEquals(4, trace.queries().size());
+        assertTrue(trace.queries().stream().allMatch(query -> query.offsetNanos() < trace.durationNanos()),
+                trace.toString());
+    }
+
+    @Test
+    void countsTheQueriesOfCompletableFuturesAndParallelStreams() throws Exception {
+        ForkJoinPool pool = new ForkJoinPool(2);
+        try {
+            handle(request(DispatcherType.REQUEST, "/books"), () -> {
+                CompletableFuture.supplyAsync(AgentInstrumentationTest::findTitleQuietly, pool)
+                        .thenApplyAsync(title -> findTitleQuietly(), pool)
+                        .join();
+                pool.submit(() -> IntStream.range(0, 8).parallel().forEach(index -> findTitleQuietly())).get();
+            });
+        } finally {
+            pool.shutdownNow();
+        }
+
+        UnitTrace trace = awaitSingleTrace();
+        assertEquals(10, trace.queries().size());
+        assertTrue(trace.callTree().topLevelCalls().stream()
+                .anyMatch(node -> node.method().equals(CallTree.ASYNC_TASKS) && node.queryIndexes().size() == 10),
+                trace.callTree().toString());
+    }
+
+    @Test
+    void countsTheQueriesOfPlainRunnablesOnAnExecutor() throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        handle(request(DispatcherType.REQUEST, "/books"), () -> {
+            pool.execute(AgentInstrumentationTest::findTitleQuietly);
+            pool.execute(AgentInstrumentationTest::findTitleQuietly);
+            pool.shutdown();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
+        });
+
+        assertEquals(2, awaitSingleTrace().queries().size());
+    }
+
+    @Test
+    void waitsBrieflyForTasksStillRunningWhenTheRequestEnds() throws Exception {
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        CountDownLatch requestDone = new CountDownLatch(1);
+        try {
+            handle(request(DispatcherType.REQUEST, "/books"), () -> pool.submit(() -> {
+                requestDone.await(10, TimeUnit.SECONDS);
+                return findTitleQuietly();
+            }));
+            assertTrue(TRACES.isEmpty(), TRACES.toString());
+            requestDone.countDown();
+
+            assertEquals(1, awaitSingleTrace().queries().size());
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void keepsTasksThatOutliveTheWaitAsTasksOfTheirOwn() throws Exception {
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        CountDownLatch requestDone = new CountDownLatch(1);
+        try {
+            handle(request(DispatcherType.REQUEST, "/books"), () -> pool.submit(() -> {
+                requestDone.await(10, TimeUnit.SECONDS);
+                return findTitleQuietly();
+            }));
+            UnitTrace request = awaitTrace("/books");
+            requestDone.countDown();
+
+            UnitTrace task = awaitTrace("Async from GET /books");
+            assertEquals(UnitKind.HTTP, request.kind());
+            assertTrue(request.queries().isEmpty());
+            assertEquals(UnitKind.TASK, task.kind());
+            assertEquals(1, task.queries().size());
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void leavesExecutorsOutsideRequestsAlone() throws Exception {
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            pool.submit(AgentInstrumentationTest::findTitleQuietly).get();
+        } finally {
+            pool.shutdownNow();
+        }
+
+        UnitTrace trace = singleTrace();
+        assertEquals(UnitKind.TASK, trace.kind());
+        assertFalse(trace.path().startsWith("Async from"), trace.path());
     }
 
     @Test
@@ -483,12 +600,28 @@ class AgentInstrumentationTest {
         return nodes.get(0);
     }
 
+    private static String findTitleQuietly() {
+        try {
+            findTitle();
+            return "found";
+        } catch (SQLException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     private static void findTitle() throws SQLException {
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(BY_ID)) {
             statement.setInt(1, 1);
             statement.executeQuery().close();
         }
+    }
+
+    private static UnitTrace awaitSingleTrace() throws InterruptedException {
+        for (int attempt = 0; attempt < 100 && TRACES.isEmpty(); attempt++) {
+            Thread.sleep(50);
+        }
+        return singleTrace();
     }
 
     private static UnitTrace singleTrace() {

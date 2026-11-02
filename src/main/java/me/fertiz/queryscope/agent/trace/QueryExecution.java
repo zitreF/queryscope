@@ -11,4 +11,8 @@ public record QueryExecution(
 ) {
 
     public static final int NO_RESULT = -1;
+
+    QueryExecution shiftedBy(long nanos) {
+        return new QueryExecution(sql, parameters, offsetNanos + nanos, durationNanos, rows, callSite, failed);
+    }
 }

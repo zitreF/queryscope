@@ -39,6 +39,7 @@ public final class QueryScopeLauncher {
               --package=com.acme          package whose methods go into the call tree, can be repeated,
                                           by default the package of the application's main class
               --callTree=false            turns the call tree off
+              --async=false               keeps the queries of async tasks out of the request behind them
               --sampleMs=10               how often the sampling profiler takes a stack sample
               --sampling=false            turns the sampling profiler off
               --entry=com.acme.Job#run    method whose call becomes one task, can be repeated

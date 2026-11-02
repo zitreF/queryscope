@@ -98,6 +98,9 @@ matcher and an advice class:
 | the classes named by `entry=`                    | the methods named by `entry=`                       | `EntryAdvice`           |
 | classes of your packages                         | every method except constructors, bridges, synthetic and native ones | `MethodAdvice` |
 | the JDK's `com.sun.net.httpserver.Filter$Chain`  | `doFilter(exchange)`                                | `JdkHttpServerAdvice`   |
+| `ThreadPoolExecutor`, `ForkJoinPool`             | `execute`, `submit`, `invoke`                       | `AsyncSubmitAdvice`     |
+| `ForkJoinTask`                                   | `fork()`                                            | `AsyncForkAdvice`       |
+| `FutureTask`, `ForkJoinTask`, the tasks of `CompletableFuture` | `run()`, `doExec()`                    | `AsyncRunAdvice`        |
 
 The choices behind it:
 
@@ -118,6 +121,10 @@ The choices behind it:
   edge from the `jdk.httpserver` module. The inlined advice only calls the bridge, and the bridge hands the exchange
   to `JdkHttpServerRequests` in the agent, which opens and closes the request. Exchanges on QueryScope's own threads,
   the panel and the hub, are left out.
+- **The same bridge idea for async work.** `AsyncBridge` lives in the bootstrap loader too, because its callers are
+  `java.util.concurrent` classes. It is connected to the agent through `Supplier`, `Predicate` and `Consumer` only: a
+  type of its own in a signature the agent calls would be loaded once by the application's class loader while the
+  agent's classes are verified, and once more by the bootstrap loader, and the JVM refuses to link the two.
 - **Isolation.** The agent ignores its own classes, ByteBuddy, `java.*`, `jdk.*`, `sun.*` and `com.sun.*`. ByteBuddy is
   shaded into `me.fertiz.queryscope.agent.shaded`, so it never clashes with the ByteBuddy that Hibernate brings, and
   `Nexus` injection is turned off because inlined advice does not need it.
@@ -137,7 +144,17 @@ The choices behind it:
   packages that is on the stack, or the nearest application frame when there is no call tree.
 - **Entry tasks** start and end with a method named by `entry=`, so a whole job is one unit however many connections
   it opens.
-
+- **Async tasks** belong to the request or task that submitted them. When a task is handed to a `ThreadPoolExecutor`
+  or `ForkJoinPool`, or forked as a `ForkJoinTask`, from a thread inside a unit, the task object is remembered with
+  that unit and the unit counts it as running. `FutureTask`s and `ForkJoinTask`s keep their identity; a plain
+  `Runnable` or `Callable` is wrapped in a small tracked one. When the task starts on a pool thread, that thread gets
+  an async unit of its own, and when the task ends, its queries and call tree are handed to the owner. A task that
+  runs on the owner's own thread, as when a pool runs it on the caller or a thread helps with a `join`, records into
+  the owner directly. The queries keep their time relative to the owner's start, after the owner's own queries, and
+  the call tree gets one `(async tasks)` node with the methods of all tasks merged by name. An owner that returns
+  while tasks are still running waits for them for up to a second before it is published, which is what makes
+  `future.get()` and `join()` safe: they return before the pool thread has left `run()`. Tasks that run longer, or
+  start after the owner was published, are published on their own as `Async from GET /path`.
 An `ActiveUnit` records its start in wall-clock and monotonic time, its thread ID, the number of classes the JVM had
 loaded, its queries and its call tree. When it ends it becomes an immutable `UnitTrace`. Units that ran neither SQL
 nor any of your methods are dropped.
@@ -299,9 +316,11 @@ Everything QueryScope keeps has a limit:
 | Traced methods                | 20, each with its 50 latest and 10 slowest calls   |
 | Load tests                    | one at a time, the last 10 kept, 10,000 requests and 50 at once at most |
 | Statements and result sets    | held weakly, gone with the application's objects   |
+| Async tasks not started yet   | held weakly; a finished request waits at most 1 s for its running tasks |
 
 QueryScope's threads are daemons, so they never keep the application alive: `queryscope-panel-*` for the panel,
-`queryscope-flight-recorder` for the sampler, `queryscope-load-test-*` for load tests, `queryscope-sampler-start` and `queryscope-panel-start` for startup, and
+`queryscope-flight-recorder` for the sampler, `queryscope-load-test-*` for load tests, `queryscope-async-wait` for
+requests that wait for their async tasks, `queryscope-sampler-start` and `queryscope-panel-start` for startup, and
 `queryscope-summary` as the shutdown hook. Samples taken on QueryScope's own threads are dropped. A finished unit is
 analyzed on the thread that ran it, because a report handed to another thread right before the JVM stops would lose
 its log line: logging frameworks close their handlers in shutdown hooks of their own.
@@ -351,9 +370,11 @@ me.fertiz.queryscope.agent             QueryScopeAgent (premain, agentmain), Age
 ├── config                             AgentConfig, AgentProperties (system properties shared with launcher and hub)
 ├── appcode                            which classes are your code: AppPackages, CallSites
 ├── trace                              requests and tasks with their SQL: UnitTracer, ActiveUnit, LiveQuery,
-│                                      BoundStatement, Servlets, the JDBC, servlet and entry advice, UnitTrace
+│                                      BoundStatement, Servlets, AsyncTasks, AsyncWait, the JDBC, servlet, entry and
+│                                      async advice, UnitTrace
+├── bootstrap                          classes injected into the bootstrap loader: HttpServerBridge, AsyncBridge
 ├── calltree                           the call tree of your methods: CallTracer, CallTreeBuilder, MethodAdvice,
-│                                      CallTree, CallNode
+│                                      CallTree, CallNode, AsyncCalls
 ├── methodtrace                        tracing chosen methods: MethodTracer, MethodTraceAdvice, MethodTraces,
 │                                      TracedMethod, LatencyHistogram
 ├── loadtest                           LoadTester, LoadTest, LoadTestPlan, LoadTestResult, LoopbackHttp

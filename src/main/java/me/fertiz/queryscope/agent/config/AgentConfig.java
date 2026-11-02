@@ -19,6 +19,7 @@ public record AgentConfig(
         List<String> traceMethods,
         List<String> packages,
         boolean callTree,
+        boolean async,
         boolean sampling,
         Duration sampleInterval,
         boolean openPanel,
@@ -26,7 +27,8 @@ public record AgentConfig(
 ) {
 
     public static final AgentConfig DEFAULTS = new AgentConfig(7070, false, 5, Duration.ofMillis(100), 500, 30,
-            Duration.ofMillis(100), List.of(), List.of(), List.of(), true, true, Duration.ofMillis(10), false, true);
+            Duration.ofMillis(100), List.of(), List.of(), List.of(), true, true, true, Duration.ofMillis(10), false,
+            true);
 
     private static final int MAX_SAMPLE_MILLIS = 1000;
 
@@ -56,6 +58,7 @@ public record AgentConfig(
         List<String> traceMethods = new ArrayList<>();
         List<String> packages = new ArrayList<>();
         boolean callTree = DEFAULTS.callTree();
+        boolean async = DEFAULTS.async();
         boolean sampling = DEFAULTS.sampling();
         Duration sampleInterval = DEFAULTS.sampleInterval();
         boolean openPanel = DEFAULTS.openPanel();
@@ -81,18 +84,19 @@ public record AgentConfig(
                 case "trace" -> traceMethods.add(parseMethodReference(key, value));
                 case "package" -> packages.add(parsePackageName(value));
                 case "callTree", "profile" -> callTree = parseFlag(key, value);
+                case "async" -> async = parseFlag(key, value);
                 case "sampling" -> sampling = parseFlag(key, value);
                 case "sampleMs" -> sampleInterval = Duration.ofMillis(parseSampleMillis(value));
                 case "open" -> openPanel = parseFlag(key, value);
                 case "summary" -> printSummary = parseFlag(key, value);
                 default -> throw new IllegalArgumentException("Unknown QueryScope option '" + key
                         + "', known options are port, nPlusOneThreshold, slowQueryMs, largeResultRows, maxQueries,"
-                        + " slowMethodMs, entry, trace, package, callTree, sampling, sampleMs, open and summary");
+                        + " slowMethodMs, entry, trace, package, callTree, async, sampling, sampleMs, open and summary");
             }
         }
         return new AgentConfig(port, portGiven, nPlusOneThreshold, slowQueryThreshold, largeResultRows, maxQueries,
-                slowMethodThreshold, entryMethods, traceMethods, packages, callTree, sampling, sampleInterval, openPanel,
-                printSummary);
+                slowMethodThreshold, entryMethods, traceMethods, packages, callTree, async, sampling, sampleInterval,
+                openPanel, printSummary);
     }
 
     public Thresholds thresholds() {

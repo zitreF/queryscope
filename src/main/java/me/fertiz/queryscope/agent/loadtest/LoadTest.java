@@ -4,6 +4,7 @@ import me.fertiz.queryscope.agent.findings.Finding;
 import me.fertiz.queryscope.agent.findings.FindingKind;
 import me.fertiz.queryscope.agent.findings.FindingText;
 import me.fertiz.queryscope.agent.findings.UnitReport;
+import me.fertiz.queryscope.agent.trace.UnitKind;
 import me.fertiz.queryscope.agent.trace.UnitTrace;
 
 import java.io.IOException;
@@ -85,10 +86,10 @@ final class LoadTest {
     }
 
     synchronized void recordServerSide(UnitReport report) {
-        if (traced == serverNanos.length) {
+        UnitTrace trace = report.trace();
+        if (trace.kind() != UnitKind.HTTP || traced == serverNanos.length) {
             return;
         }
-        UnitTrace trace = report.trace();
         int count = trace.queryCount();
         fewestQueries = traced == 0 ? count : Math.min(fewestQueries, count);
         mostQueries = Math.max(mostQueries, count);

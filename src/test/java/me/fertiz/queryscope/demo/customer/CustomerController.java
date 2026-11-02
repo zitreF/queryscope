@@ -13,10 +13,13 @@ public class CustomerController {
 
     private final CustomerService customerService;
     private final CustomerCardService customerCardService;
+    private final CustomerDashboardService customerDashboardService;
 
-    public CustomerController(CustomerService customerService, CustomerCardService customerCardService) {
+    public CustomerController(CustomerService customerService, CustomerCardService customerCardService,
+                              CustomerDashboardService customerDashboardService) {
         this.customerService = customerService;
         this.customerCardService = customerCardService;
+        this.customerDashboardService = customerDashboardService;
     }
 
     @GetMapping("/naive")
@@ -32,5 +35,10 @@ public class CustomerController {
     @GetMapping("/{id}/card")
     public CustomerCard card(@PathVariable long id) {
         return customerCardService.card(id);
+    }
+
+    @GetMapping("/{id}/dashboard")
+    public CustomerDashboard dashboard(@PathVariable long id) {
+        return customerDashboardService.dashboard(id);
     }
 }

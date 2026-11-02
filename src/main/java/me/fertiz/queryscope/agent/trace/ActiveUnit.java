@@ -1,5 +1,6 @@
 package me.fertiz.queryscope.agent.trace;
 
+import me.fertiz.queryscope.agent.calltree.AsyncCalls;
 import me.fertiz.queryscope.agent.calltree.CallTracer;
 import me.fertiz.queryscope.agent.calltree.CallTree;
 import me.fertiz.queryscope.agent.calltree.CallTreeBuilder;
@@ -26,6 +27,9 @@ final class ActiveUnit {
     private final boolean startedByQuery;
     private final int localPort;
     private final long loadTestRun;
+    private final ActiveUnit owner;
+    private final Object asyncTask;
+    private final boolean countsForOwner;
     private final Instant startedAt = Instant.now();
     private final long startedNanos = System.nanoTime();
     private final long classesAtStart = CLASSES.getTotalLoadedClassCount();
@@ -38,9 +42,13 @@ final class ActiveUnit {
     private int omittedQueries;
     private long omittedNanos;
     private String label;
+    private final List<AsyncPart> asyncParts = new ArrayList<>();
+    private int runningAsyncTasks;
+    private UnitTrace waitingTrace;
+    private boolean published;
 
     private ActiveUnit(long id, UnitKind kind, String method, String path, boolean startedByQuery, int localPort,
-                       long loadTestRun) {
+                       long loadTestRun, ActiveUnit owner, Object asyncTask, boolean countsForOwner) {
         this.id = id;
         this.kind = kind;
         this.method = method;
@@ -48,20 +56,28 @@ final class ActiveUnit {
         this.startedByQuery = startedByQuery;
         this.localPort = localPort;
         this.loadTestRun = loadTestRun;
+        this.owner = owner;
+        this.asyncTask = asyncTask;
+        this.countsForOwner = countsForOwner;
     }
 
     static ActiveUnit http(long id, String method, String path, int localPort, long loadTestRun) {
-        return new ActiveUnit(id, UnitKind.HTTP, method, path, false, localPort, loadTestRun);
+        return new ActiveUnit(id, UnitKind.HTTP, method, path, false, localPort, loadTestRun, null, null, false);
     }
 
     static ActiveUnit entry(long id, String name) {
         return new ActiveUnit(id, UnitKind.TASK, TASK_METHOD, name, false, UnitTracer.UNKNOWN_PORT,
-                UnitTracer.NO_LOAD_TEST);
+                UnitTracer.NO_LOAD_TEST, null, null, false);
     }
 
     static ActiveUnit startedByQuery(long id, String name) {
         return new ActiveUnit(id, UnitKind.TASK, TASK_METHOD, name, true, UnitTracer.UNKNOWN_PORT,
-                UnitTracer.NO_LOAD_TEST);
+                UnitTracer.NO_LOAD_TEST, null, null, false);
+    }
+
+    static ActiveUnit asyncTask(long id, ActiveUnit owner, Object task, boolean countsForOwner) {
+        return new ActiveUnit(id, UnitKind.TASK, TASK_METHOD, "Async from " + owner.label(), false,
+                UnitTracer.UNKNOWN_PORT, owner.loadTestRun, owner, task, countsForOwner);
     }
 
     long id() {
@@ -77,6 +93,62 @@ final class ActiveUnit {
 
     boolean isStartedByQuery() {
         return startedByQuery;
+    }
+
+    ActiveUnit owner() {
+        return owner == null ? this : owner;
+    }
+
+    boolean runs(Object task) {
+        return asyncTask != null && asyncTask == task;
+    }
+
+    long startedNanos() {
+        return startedNanos;
+    }
+
+    boolean countsForOwner() {
+        return countsForOwner;
+    }
+
+    synchronized UnitTrace publishableTrace(UnitTrace own) {
+        if (runningAsyncTasks == 0) {
+            published = true;
+            return withAsyncParts(own);
+        }
+        waitingTrace = own;
+        return null;
+    }
+
+    synchronized List<UnitTrace> attachedTaskEnded(UnitTrace task, long taskStartedNanos) {
+        runningAsyncTasks--;
+        if (published) {
+            return task == null ? List.of() : List.of(task);
+        }
+        if (task != null) {
+            asyncParts.add(new AsyncPart(task, taskStartedNanos - startedNanos));
+        }
+        if (waitingTrace == null || runningAsyncTasks > 0) {
+            return List.of();
+        }
+        published = true;
+        return List.of(withAsyncParts(waitingTrace));
+    }
+
+    synchronized UnitTrace asyncWaitEnded() {
+        if (published || waitingTrace == null) {
+            return null;
+        }
+        published = true;
+        return withAsyncParts(waitingTrace);
+    }
+
+    synchronized boolean attachAsyncTask() {
+        if (published) {
+            return false;
+        }
+        runningAsyncTasks++;
+        return true;
     }
 
     boolean isBetweenQueries() {
@@ -139,5 +211,39 @@ final class ActiveUnit {
                 Collections.unmodifiableList(executions), callTree,
                 CLASSES.getTotalLoadedClassCount() - classesAtStart, threadId, omittedQueries, omittedNanos, localPort,
                 loadTestRun);
+    }
+
+    private UnitTrace withAsyncParts(UnitTrace own) {
+        if (asyncParts.isEmpty()) {
+            return own;
+        }
+        List<QueryExecution> executions = new ArrayList<>(own.queries());
+        int omitted = own.omittedQueries();
+        long omittedTime = own.omittedNanos();
+        List<AsyncCalls> asyncCalls = new ArrayList<>(asyncParts.size());
+        for (AsyncPart part : asyncParts) {
+            UnitTrace task = part.trace();
+            int firstIndex = executions.size();
+            int kept = Math.max(0, Math.min(task.queries().size(), MAX_RECORDED_QUERIES - firstIndex));
+            for (int index = 0; index < task.queries().size(); index++) {
+                QueryExecution query = task.queries().get(index);
+                if (index < kept) {
+                    executions.add(query.shiftedBy(part.offsetNanos()));
+                } else {
+                    omitted++;
+                    omittedTime += query.durationNanos();
+                }
+            }
+            omitted += task.omittedQueries();
+            omittedTime += task.omittedNanos();
+            asyncCalls.add(new AsyncCalls(task.callTree(), task.durationNanos(), firstIndex, kept));
+        }
+        CallTree callTree = calls == null ? own.callTree() : own.callTree().withAsyncCalls(asyncCalls);
+        return new UnitTrace(own.id(), own.kind(), own.method(), own.path(), own.status(), own.startedAt(),
+                own.durationNanos(), Collections.unmodifiableList(executions), callTree, own.classesLoaded(),
+                own.threadId(), omitted, omittedTime, own.localPort(), own.loadTestRun());
+    }
+
+    private record AsyncPart(UnitTrace trace, long offsetNanos) {
     }
 }

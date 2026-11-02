@@ -20,6 +20,14 @@ final class WeakIdentityMap<V> {
         return values.get(new Probe(key));
     }
 
+    V remove(Object key) {
+        return values.remove(new Probe(key));
+    }
+
+    boolean isEmpty() {
+        return values.isEmpty();
+    }
+
     int size() {
         removeCollected();
         return values.size();
