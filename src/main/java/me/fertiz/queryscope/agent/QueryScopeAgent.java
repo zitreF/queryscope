@@ -79,10 +79,7 @@ public final class QueryScopeAgent {
             logCallTreePackages(application);
         }
         AgentInstaller.install(instrumentation, config.entryMethods(), callTreePackages);
-        hookJdkHttpServer(instrumentation);
-        if (config.async()) {
-            hookAsyncWork(instrumentation);
-        }
+        hookJdkClasses(instrumentation, config.async());
         MethodTracer tracer = new MethodTracer(instrumentation::getAllLoadedClasses,
                 (className, methodName) -> AgentInstaller.installMethodTrace(instrumentation, className, methodName));
         startTraces(tracer, config.traceMethods());
@@ -133,19 +130,12 @@ public final class QueryScopeAgent {
         }
     }
 
-    private static void hookJdkHttpServer(Instrumentation instrumentation) {
+    private static void hookJdkClasses(Instrumentation instrumentation, boolean async) {
         try {
-            AgentInstaller.installJdkHttpServerHook(instrumentation);
+            AgentInstaller.installJdkHooks(instrumentation, async);
         } catch (IOException | RuntimeException | LinkageError e) {
-            LOGGER.log(System.Logger.Level.WARNING, "QueryScope cannot see requests of the JDK's HttpServer: " + e);
-        }
-    }
-
-    private static void hookAsyncWork(Instrumentation instrumentation) {
-        try {
-            AgentInstaller.installAsyncHooks(instrumentation);
-        } catch (IOException | RuntimeException | LinkageError e) {
-            LOGGER.log(System.Logger.Level.WARNING, "QueryScope cannot follow requests into their async tasks: " + e);
+            LOGGER.log(System.Logger.Level.WARNING, "QueryScope cannot see requests of the JDK's HttpServer"
+                    + (async ? " or follow requests into their async tasks: " : ": ") + e);
         }
     }
 

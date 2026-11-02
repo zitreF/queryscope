@@ -333,6 +333,16 @@ designed to stay around one percent of CPU. The call tree costs a few dozen nano
 which only shows in tight loops over tiny methods. Instrumenting classes costs time when they load, which is most
 visible right after attaching to a large application.
 
+The hooks on the JDK's executors were measured with load tests on the demo, three rounds each, with and without
+`async=false` alternating: 870 against 881 requests per second on `/api/customers/optimized`, which runs no async work,
+well inside the 10% spread between runs, and the same startup time. Outside a unit each hook costs a volatile read and
+a `ThreadLocal` lookup.
+
+Both bridges are added to the bootstrap class loader in one jar through `Instrumentation`, so the JVM prints once that
+class data sharing now covers only the classes of the boot loader. Startup of the demo was the same within a quarter of
+a second when the bridges were defined without the jar instead, through `jdk.internal.misc.Unsafe`, and that way makes
+the JDK warn about a deprecated `sun.misc.Unsafe` method on every start, so the jar stays.
+
 ## Testing
 
 `./gradlew build` runs every test, from units to real JVMs:

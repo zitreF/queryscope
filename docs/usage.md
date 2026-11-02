@@ -145,7 +145,8 @@ QueryScope hub that runs in the same container.
 ### Starting the demo
 
 The repository ships a small shop with deliberate problems, see the README. `./gradlew runDemo` builds the agent and
-starts the shop with it on http://localhost:8080, with the panel on http://localhost:7070.
+starts the shop with it on http://localhost:8080, with the panel on http://localhost:7070. Agent options go in
+`-PagentOptions`, for example `./gradlew runDemo -PagentOptions=async=false,slowQueryMs=50`.
 
 ## A tour of the panel
 

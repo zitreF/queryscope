@@ -41,6 +41,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -110,17 +111,23 @@ public final class AgentInstaller {
         return () -> transformer.reset(instrumentation, AgentBuilder.RedefinitionStrategy.RETRANSFORMATION);
     }
 
-    public static void installJdkHttpServerHook(Instrumentation instrumentation) throws IOException {
-        Class<?> bridge = injectIntoBootstrap(instrumentation, Set.of(HTTP_SERVER_BRIDGE)).get(HTTP_SERVER_BRIDGE);
+    public static void installJdkHooks(Instrumentation instrumentation, boolean async) throws IOException {
+        Set<String> bridges = new HashSet<>(Set.of(HTTP_SERVER_BRIDGE));
+        if (async) {
+            bridges.addAll(ASYNC_BRIDGE_CLASSES);
+        }
+        Map<String, Class<?>> injected = injectIntoBootstrap(instrumentation, bridges);
         HttpServerBridge.connect(JdkHttpServerRequests::requestStarted, JdkHttpServerRequests::requestFinished);
-        installOnJdkClasses(instrumentation, bridge, List.of(new Hook(named(HTTP_SERVER_FILTER_CHAIN),
-                named("doFilter").and(takesArguments(1)), JdkHttpServerAdvice.class)));
+        installOnJdkClasses(instrumentation, injected.get(HTTP_SERVER_BRIDGE), List.of(new Hook(
+                named(HTTP_SERVER_FILTER_CHAIN), named("doFilter").and(takesArguments(1)), JdkHttpServerAdvice.class)));
+        if (async) {
+            AsyncTasks.connect();
+            installOnJdkClasses(instrumentation, injected.get(ASYNC_BRIDGE), asyncHooks());
+        }
     }
 
-    public static void installAsyncHooks(Instrumentation instrumentation) throws IOException {
-        Class<?> bridge = injectIntoBootstrap(instrumentation, ASYNC_BRIDGE_CLASSES).get(ASYNC_BRIDGE);
-        AsyncTasks.connect();
-        installOnJdkClasses(instrumentation, bridge, List.of(
+    private static List<Hook> asyncHooks() {
+        return List.of(
                 new Hook(named(CONCURRENT + "ThreadPoolExecutor"),
                         named("execute").and(takesArguments(Runnable.class)),
                         AsyncSubmitAdvice.class),
@@ -139,7 +146,7 @@ public final class AgentInstaller {
                 new Hook(namedOneOf(CONCURRENT + "CompletableFuture$AsyncSupply", CONCURRENT + "CompletableFuture$AsyncRun",
                         CONCURRENT + "CompletableFuture$Completion"),
                         named("run").and(takesArguments(0)),
-                        AsyncRunAdvice.class)));
+                        AsyncRunAdvice.class));
     }
 
     private static Map<String, Class<?>> injectIntoBootstrap(Instrumentation instrumentation, Set<String> classes)

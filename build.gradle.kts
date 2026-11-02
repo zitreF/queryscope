@@ -52,6 +52,7 @@ tasks.shadowJar {
 val agentJar = tasks.shadowJar.flatMap { it.archiveFile }
 val demoClasspath = sourceSets.test.get().runtimeClasspath - sourceSets.main.get().output
 val tomcatHome = providers.gradleProperty("tomcat")
+val demoAgentOptions = providers.gradleProperty("agentOptions")
 
 val bookshelfWar = tasks.register<Zip>("bookshelfWar") {
     description = "Packs the servlet from the tests into a WAR for the Tomcat end-to-end test."
@@ -91,6 +92,6 @@ tasks.register<JavaExec>("runDemo") {
     classpath = demoClasspath
     mainClass = "me.fertiz.queryscope.demo.DemoApplication"
     jvmArgumentProviders.add(CommandLineArgumentProvider {
-        listOf("-javaagent:${agentJar.get().asFile.absolutePath}")
+        listOf("-javaagent:${agentJar.get().asFile.absolutePath}" + demoAgentOptions.map { "=$it" }.getOrElse(""))
     })
 }

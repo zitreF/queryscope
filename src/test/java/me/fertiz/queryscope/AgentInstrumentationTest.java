@@ -82,8 +82,7 @@ class AgentInstrumentationTest {
         instrumentation = ByteBuddyAgent.install();
         AgentInstaller.install(instrumentation, List.of(ImportJob.class.getName() + "#run"),
                 AppPackages.of(List.of(BookCatalog.class.getPackageName())));
-        AgentInstaller.installJdkHttpServerHook(instrumentation);
-        AgentInstaller.installAsyncHooks(instrumentation);
+        AgentInstaller.installJdkHooks(instrumentation, true);
         UnitTracer.publishTo(TRACES::add);
 
         HikariConfig config = new HikariConfig();
