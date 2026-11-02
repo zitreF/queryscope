@@ -75,12 +75,16 @@ public final class HttpSupport {
 
     public static String readBody(HttpExchange exchange, int maxBytes) throws IOException {
         try (InputStream in = exchange.getRequestBody()) {
-            return new String(in.readNBytes(maxBytes), StandardCharsets.UTF_8);
+            byte[] body = in.readNBytes(maxBytes + 1);
+            if (body.length > maxBytes) {
+                throw new IllegalArgumentException("The request can have at most " + maxBytes / 1024 + " KB");
+            }
+            return new String(body, StandardCharsets.UTF_8);
         }
     }
 
     public static String errorJson(String message) {
-        return new JsonWriter().beginObject().name("error").value(message).endObject().toString();
+        return Json.write(Json.object().put("error", message));
     }
 
     public static boolean sameOrigin(HttpExchange exchange) {

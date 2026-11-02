@@ -1,10 +1,12 @@
 package me.fertiz.queryscope.agent.panel;
 
 import me.fertiz.queryscope.agent.findings.FindingKind;
-import me.fertiz.queryscope.agent.http.JsonWriter;
+import me.fertiz.queryscope.agent.http.Json;
 import me.fertiz.queryscope.agent.loadtest.LoadTestPlan;
 import me.fertiz.queryscope.agent.loadtest.LoadTestResult;
 import me.fertiz.queryscope.agent.loadtest.LoadTester;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.List;
 import java.util.Locale;
@@ -18,78 +20,69 @@ final class LoadTestJson {
     }
 
     static String testsToJson(List<LoadTestResult> newestFirst) {
-        JsonWriter json = new JsonWriter().beginObject()
-                .name("maxRequests").value(LoadTestPlan.MAX_REQUESTS)
-                .name("maxConcurrency").value(LoadTestPlan.MAX_CONCURRENCY)
-                .name("kept").value(LoadTester.KEPT_TESTS)
-                .name("tests").beginArray();
-        newestFirst.forEach(result -> writeResult(json, result));
-        return json.endArray().endObject().toString();
+        return Json.write(Json.object()
+                .put("maxRequests", LoadTestPlan.MAX_REQUESTS)
+                .put("maxConcurrency", LoadTestPlan.MAX_CONCURRENCY)
+                .put("kept", LoadTester.KEPT_TESTS)
+                .set("tests", Json.array(newestFirst, LoadTestJson::resultJson)));
     }
 
     static String resultToJson(LoadTestResult result) {
-        JsonWriter json = new JsonWriter();
-        writeResult(json, result);
-        return json.toString();
+        return Json.write(resultJson(result));
     }
 
-    private static void writeResult(JsonWriter json, LoadTestResult result) {
-        json.beginObject()
-                .name("id").value(result.id())
-                .name("endpoint").value(result.plan().endpoint())
-                .name("method").value(result.plan().method())
-                .name("target").value(result.plan().target().toString())
-                .name("headerNames").beginArray();
-        result.plan().headers().keySet().forEach(name -> json.value(name));
-        json.endArray()
-                .name("bodyBytes").value(result.plan().bodyBytes().length)
-                .name("requests").value(result.plan().requests())
-                .name("concurrency").value(result.plan().concurrency())
-                .name("state").value(result.state().name().toLowerCase(Locale.ROOT))
-                .name("startedAt").value(result.startedAt().toString())
-                .name("elapsedMs").value(toMillis(result.elapsedNanos()))
-                .name("answered").value(result.answered())
-                .name("failed").value(result.failed())
-                .name("firstError").value(result.firstError())
-                .name("requestsPerSecond").value(result.requestsPerSecond())
-                .name("statuses").beginArray();
-        result.statuses().forEach((status, count) -> json.beginObject()
-                .name("status").value(status)
-                .name("count").value(count)
-                .endObject());
-        json.endArray().name("latency");
-        writeLatency(json, result.client());
-        json.name("server").beginObject()
-                .name("tracedRequests").value(result.tracedRequests())
-                .name("averageQueries").value(result.averageQueries())
-                .name("fewestQueries").value(result.fewestQueries())
-                .name("mostQueries").value(result.mostQueries())
-                .name("averageDatabaseMs").value(toMillis(result.averageDatabaseNanos()))
-                .name("latency");
-        writeLatency(json, result.server());
-        json.name("findings").beginArray();
-        result.findings().forEach(finding -> json.beginObject()
-                .name("type").value(ReportJson.typeOf(finding.kind()))
-                .name("example").value(finding.example())
-                .name("requests").value(finding.requests())
-                .endObject());
-        json.endArray().name("findingKinds").beginArray();
-        result.requestsByFindingKind().entrySet().stream()
+    private static ObjectNode resultJson(LoadTestResult result) {
+        ArrayNode statuses = Json.array();
+        result.statuses().forEach((status, count) -> statuses.add(Json.object()
+                .put("status", status)
+                .put("count", count)));
+        return Json.object()
+                .put("id", result.id())
+                .put("endpoint", result.plan().endpoint())
+                .put("method", result.plan().method())
+                .put("target", result.plan().target().toString())
+                .set("headerNames", Json.strings(result.plan().headers().keySet()))
+                .put("bodyBytes", result.plan().bodyBytes().length)
+                .put("requests", result.plan().requests())
+                .put("concurrency", result.plan().concurrency())
+                .put("state", result.state().name().toLowerCase(Locale.ROOT))
+                .put("startedAt", result.startedAt().toString())
+                .put("elapsedMs", toMillis(result.elapsedNanos()))
+                .put("answered", result.answered())
+                .put("failed", result.failed())
+                .put("firstError", result.firstError())
+                .put("requestsPerSecond", Json.rounded(result.requestsPerSecond()))
+                .set("statuses", statuses)
+                .set("latency", latencyJson(result.client()))
+                .set("server", serverJson(result));
+    }
+
+    private static ObjectNode serverJson(LoadTestResult result) {
+        List<Map.Entry<FindingKind, Integer>> kinds = result.requestsByFindingKind().entrySet().stream()
                 .sorted(Map.Entry.<FindingKind, Integer>comparingByValue().reversed())
-                .forEach(kind -> json.beginObject()
-                        .name("type").value(ReportJson.typeOf(kind.getKey()))
-                        .name("requests").value(kind.getValue())
-                        .endObject());
-        json.endArray().endObject().endObject();
+                .toList();
+        return Json.object()
+                .put("tracedRequests", result.tracedRequests())
+                .put("averageQueries", Json.rounded(result.averageQueries()))
+                .put("fewestQueries", result.fewestQueries())
+                .put("mostQueries", result.mostQueries())
+                .put("averageDatabaseMs", toMillis(result.averageDatabaseNanos()))
+                .set("latency", latencyJson(result.server()))
+                .set("findings", Json.array(result.findings(), finding -> Json.object()
+                        .put("type", ReportJson.typeOf(finding.kind()))
+                        .put("example", finding.example())
+                        .put("requests", finding.requests())))
+                .set("findingKinds", Json.array(kinds, kind -> Json.object()
+                        .put("type", ReportJson.typeOf(kind.getKey()))
+                        .put("requests", kind.getValue())));
     }
 
-    private static void writeLatency(JsonWriter json, LoadTestResult.Latency latency) {
-        json.beginObject()
-                .name("averageMs").value(toMillis(latency.averageNanos()))
-                .name("p50Ms").value(toMillis(latency.p50Nanos()))
-                .name("p95Ms").value(toMillis(latency.p95Nanos()))
-                .name("p99Ms").value(toMillis(latency.p99Nanos()))
-                .name("maxMs").value(toMillis(latency.maxNanos()))
-                .endObject();
+    private static ObjectNode latencyJson(LoadTestResult.Latency latency) {
+        return Json.object()
+                .put("averageMs", toMillis(latency.averageNanos()))
+                .put("p50Ms", toMillis(latency.p50Nanos()))
+                .put("p95Ms", toMillis(latency.p95Nanos()))
+                .put("p99Ms", toMillis(latency.p99Nanos()))
+                .put("maxMs", toMillis(latency.maxNanos()));
     }
 }

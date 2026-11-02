@@ -3,7 +3,6 @@ package me.fertiz.queryscope.agent.panel;
 import com.sun.net.httpserver.HttpServer;
 import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.http.HttpSupport;
-import me.fertiz.queryscope.agent.http.JsonReader;
 import me.fertiz.queryscope.agent.http.LocalServer;
 import me.fertiz.queryscope.agent.loadtest.LoadTester;
 import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
@@ -11,6 +10,8 @@ import me.fertiz.queryscope.agent.profiler.SampleStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -28,6 +29,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class McpEndpointTest {
+
+    private static final JsonMapper JSON = JsonMapper.builder()
+            .enable(DeserializationFeature.USE_LONG_FOR_INTS)
+            .build();
 
     private final HttpClient client = HttpClient.newHttpClient();
     private final ReportStore store = new ReportStore(10);
@@ -124,7 +129,7 @@ class McpEndpointTest {
         assertEquals(-32602L, errorCode(callTool("drop_tables", "{}")));
         HttpResponse<String> broken = post("{\"jsonrpc\":", null);
         assertEquals(400, broken.statusCode());
-        assertEquals(-32700L, errorCode((Map<?, ?>) JsonReader.parse(broken.body())));
+        assertEquals(-32700L, errorCode(JSON.readValue(broken.body(), Map.class)));
     }
 
     @Test
@@ -157,7 +162,7 @@ class McpEndpointTest {
         HttpResponse<String> response = post(body, null);
         assertEquals(200, response.statusCode(), response.body());
         assertEquals("application/json; charset=utf-8", response.headers().firstValue("Content-Type").orElseThrow());
-        return (Map<?, ?>) JsonReader.parse(response.body());
+        return JSON.readValue(response.body(), Map.class);
     }
 
     private HttpResponse<String> post(String body, String origin) throws Exception {

@@ -4,6 +4,7 @@ import com.sun.net.httpserver.HttpServer;
 import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.http.HttpSupport;
 import me.fertiz.queryscope.agent.http.LocalServer;
+import me.fertiz.queryscope.agent.loadtest.LoadTestPlan;
 import me.fertiz.queryscope.agent.loadtest.LoadTester;
 import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
 import me.fertiz.queryscope.agent.profiler.SampleStore;
@@ -90,7 +91,7 @@ class PanelServerTest {
         HttpResponse<String> calls = get("/api/requests/5/calls");
 
         assertEquals(200, calls.statusCode());
-        assertTrue(calls.body().startsWith("{\"id\":5,\"durationMs\":2.000,\"packages\":[\"com.acme\"]"), calls.body());
+        assertTrue(calls.body().startsWith("{\"id\":5,\"durationMs\":2.0,\"packages\":[\"com.acme\"]"), calls.body());
         assertEquals(404, get("/api/requests/6/calls").statusCode());
         assertEquals(404, get("/api/requests/5/queries").statusCode());
         assertEquals(405, client.send(request("/api/requests/5/calls").DELETE().build(),
@@ -216,6 +217,42 @@ class PanelServerTest {
         } finally {
             application.stop(0);
         }
+    }
+
+    @Test
+    void loadTestsWithABodyOfManyKilobytes() throws Exception {
+        Set<Integer> received = ConcurrentHashMap.newKeySet();
+        HttpServer application = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        application.createContext("/books", exchange -> {
+            received.add(exchange.getRequestBody().readAllBytes().length);
+            HttpSupport.sendStatus(exchange, 201);
+        });
+        application.start();
+        try {
+            store.add(Reports.servedOnPort(3, "/books", application.getAddress().getPort()));
+            String body = "x".repeat(LoadTestPlan.MAX_BODY_BYTES);
+
+            HttpResponse<String> started = postJson("/api/load-tests", "{\"id\": 3, \"requests\": 2, "
+                    + "\"concurrency\": 1, \"method\": \"PUT\", \"body\": \"" + body + "\"}", null);
+            String test = awaitLoadTest();
+
+            assertEquals(200, started.statusCode(), started.body());
+            assertTrue(test.contains("\"bodyBytes\":" + LoadTestPlan.MAX_BODY_BYTES), test);
+            assertEquals(Set.of(LoadTestPlan.MAX_BODY_BYTES), received);
+        } finally {
+            application.stop(0);
+        }
+    }
+
+    @Test
+    void refusesRequestsLargerThanItReads() throws Exception {
+        store.add(Reports.plain(1, "/orders"));
+
+        HttpResponse<String> tooLarge = postJson("/api/load-tests",
+                "{\"id\": 1, \"body\": \"" + "x".repeat(LoadTestRequest.MAX_JSON_BYTES) + "\"}", null);
+
+        assertEquals(400, tooLarge.statusCode());
+        assertTrue(tooLarge.body().contains("at most 256 KB"), tooLarge.body());
     }
 
     @Test

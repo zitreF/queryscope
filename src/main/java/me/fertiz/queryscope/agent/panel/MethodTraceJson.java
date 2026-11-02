@@ -1,10 +1,11 @@
 package me.fertiz.queryscope.agent.panel;
 
-import me.fertiz.queryscope.agent.http.JsonWriter;
+import me.fertiz.queryscope.agent.http.Json;
 import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
 import me.fertiz.queryscope.agent.methodtrace.TracedCall;
 import me.fertiz.queryscope.agent.methodtrace.TracedMethod;
 import me.fertiz.queryscope.agent.trace.UnitTracer;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.Instant;
 import java.util.List;
@@ -17,51 +18,44 @@ final class MethodTraceJson {
     }
 
     static String tracesToJson(List<TracedMethod.Snapshot> traces, int limit) {
-        JsonWriter json = new JsonWriter().beginObject()
-                .name("limit").value(limit)
-                .name("traces").beginArray();
-        traces.forEach(trace -> writeTrace(json, trace));
-        return json.endArray().endObject().toString();
+        return Json.write(Json.object()
+                .put("limit", limit)
+                .set("traces", Json.array(traces, MethodTraceJson::traceJson)));
     }
 
     static String startedToJson(MethodTracer.StartedTrace started) {
-        return new JsonWriter().beginObject()
-                .name("method").value(started.method())
-                .name("loadedClasses").value(started.loadedClasses())
-                .endObject().toString();
+        return Json.write(Json.object()
+                .put("method", started.method())
+                .put("loadedClasses", started.loadedClasses()));
     }
 
-    private static void writeTrace(JsonWriter json, TracedMethod.Snapshot trace) {
-        json.beginObject()
-                .name("method").value(trace.method())
-                .name("since").value(trace.since().toString())
-                .name("calls").value(trace.calls())
-                .name("failures").value(trace.failures())
-                .name("totalMs").value(toMillis(trace.totalNanos()))
-                .name("averageMs").value(toMillis(trace.averageNanos()))
-                .name("p50Ms").value(toMillis(trace.p50Nanos()))
-                .name("p95Ms").value(toMillis(trace.p95Nanos()))
-                .name("p99Ms").value(toMillis(trace.p99Nanos()))
-                .name("maxMs").value(toMillis(trace.maxNanos()))
-                .name("slowest").beginArray();
-        trace.slowest().forEach(call -> writeCall(json, call));
-        json.endArray().name("recent").beginArray();
-        trace.recent().forEach(call -> writeCall(json, call));
-        json.endArray().endObject();
+    private static ObjectNode traceJson(TracedMethod.Snapshot trace) {
+        return Json.object()
+                .put("method", trace.method())
+                .put("since", trace.since().toString())
+                .put("calls", trace.calls())
+                .put("failures", trace.failures())
+                .put("totalMs", toMillis(trace.totalNanos()))
+                .put("averageMs", toMillis(trace.averageNanos()))
+                .put("p50Ms", toMillis(trace.p50Nanos()))
+                .put("p95Ms", toMillis(trace.p95Nanos()))
+                .put("p99Ms", toMillis(trace.p99Nanos()))
+                .put("maxMs", toMillis(trace.maxNanos()))
+                .set("slowest", Json.array(trace.slowest(), MethodTraceJson::callJson))
+                .set("recent", Json.array(trace.recent(), MethodTraceJson::callJson));
     }
 
-    private static void writeCall(JsonWriter json, TracedCall call) {
-        json.beginObject()
-                .name("endedAt").value(Instant.ofEpochMilli(call.endedAtMillis()).toString())
-                .name("durationMs").value(toMillis(call.durationNanos()))
-                .name("failed").value(call.failed())
-                .name("thread").value(call.thread())
-                .name("unitId");
+    private static ObjectNode callJson(TracedCall call) {
+        ObjectNode json = Json.object()
+                .put("endedAt", Instant.ofEpochMilli(call.endedAtMillis()).toString())
+                .put("durationMs", toMillis(call.durationNanos()))
+                .put("failed", call.failed())
+                .put("thread", call.thread());
         if (call.unitId() == UnitTracer.NO_UNIT) {
-            json.nullValue();
+            json.putNull("unitId");
         } else {
-            json.value(call.unitId());
+            json.put("unitId", call.unitId());
         }
-        json.name("unit").value(call.unit()).endObject();
+        return json.put("unit", call.unit());
     }
 }

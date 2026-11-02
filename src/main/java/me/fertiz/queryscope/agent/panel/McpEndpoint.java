@@ -4,19 +4,20 @@ import com.sun.net.httpserver.HttpExchange;
 import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.console.AiReport;
 import me.fertiz.queryscope.agent.findings.UnitReport;
-import me.fertiz.queryscope.agent.http.JsonReader;
-import me.fertiz.queryscope.agent.http.JsonWriter;
+import me.fertiz.queryscope.agent.http.Json;
 import me.fertiz.queryscope.agent.loadtest.LoadTestPlan;
 import me.fertiz.queryscope.agent.loadtest.LoadTestResult;
 import me.fertiz.queryscope.agent.loadtest.LoadTester;
 import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.BooleanNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.function.Consumer;
+import java.util.OptionalLong;
 import java.util.function.Supplier;
 
 import static me.fertiz.queryscope.agent.http.HttpSupport.JSON;
@@ -29,7 +30,7 @@ import static me.fertiz.queryscope.agent.http.HttpSupport.sendStatus;
 final class McpEndpoint {
 
     private static final List<String> PROTOCOL_VERSIONS = List.of("2025-06-18", "2025-03-26", "2024-11-05");
-    private static final int MAX_BODY = 64 * 1024;
+    private static final int MAX_BODY = LoadTestRequest.MAX_JSON_BYTES;
     private static final int PARSE_ERROR = -32700;
     private static final int INVALID_REQUEST = -32600;
     private static final int METHOD_NOT_FOUND = -32601;
@@ -103,63 +104,59 @@ final class McpEndpoint {
         if (!requireMethod(exchange, "POST") || !requireJsonFromSameOrigin(exchange)) {
             return;
         }
-        Object message;
+        JsonNode request;
         try {
-            message = JsonReader.parse(readBody(exchange, MAX_BODY));
+            request = Json.read(readBody(exchange, MAX_BODY));
         } catch (IllegalArgumentException e) {
             respond(exchange, 400, JSON, errorResponse(null, PARSE_ERROR, e.getMessage()));
             return;
         }
-        if (!(message instanceof Map<?, ?> request) || !(request.get("method") instanceof String method)) {
+        if (!request.isObject() || !request.path("method").isString()) {
             respond(exchange, 400, JSON, errorResponse(null, INVALID_REQUEST, "Send one JSON-RPC 2.0 request"));
             return;
         }
-        if (!request.containsKey("id")) {
+        if (!request.has("id")) {
             sendStatus(exchange, 202);
             return;
         }
-        respond(exchange, 200, JSON, answer(request.get("id"), method, mapOrEmpty(request.get("params"))));
+        respond(exchange, 200, JSON, answer(request.get("id"), request.get("method").stringValue(),
+                request.path("params")));
     }
 
-    String answer(Object id, String method, Map<?, ?> params) {
+    String answer(JsonNode id, String method, JsonNode params) {
         return switch (method) {
-            case "initialize" -> response(id, json -> writeInitializeResult(json, params));
-            case "ping" -> response(id, json -> json.beginObject().endObject());
-            case "tools/list" -> response(id, McpEndpoint::writeTools);
+            case "initialize" -> response(id, initializeResult(params));
+            case "ping" -> response(id, Json.object());
+            case "tools/list" -> response(id, Json.object().set("tools", Json.array(TOOLS, McpEndpoint::toolJson)));
             case "tools/call" -> callTool(id, params);
             default -> errorResponse(id, METHOD_NOT_FOUND, "QueryScope has no method " + method);
         };
     }
 
-    private String callTool(Object id, Map<?, ?> params) {
-        Object name = params.get("name");
+    private String callTool(JsonNode id, JsonNode params) {
+        String name = textOrNull(params.path("name"));
         if (TOOLS.stream().noneMatch(tool -> tool.name().equals(name))) {
             return errorResponse(id, INVALID_PARAMS, "QueryScope has no tool " + name);
         }
-        Map<?, ?> arguments = mapOrEmpty(params.get("arguments"));
+        JsonNode arguments = params.path("arguments");
         String text;
         boolean failed = false;
         try {
-            text = runTool((String) name, arguments);
+            text = runTool(name, arguments);
         } catch (IllegalArgumentException | IllegalStateException e) {
             text = e.getMessage();
             failed = true;
         }
-        String resultText = text;
-        boolean isError = failed;
-        return response(id, json -> json.beginObject()
-                .name("content").beginArray()
-                .beginObject().name("type").value("text").name("text").value(resultText).endObject()
-                .endArray()
-                .name("isError").value(isError)
-                .endObject());
+        return response(id, Json.object()
+                .set("content", Json.array().add(Json.object().put("type", "text").put("text", text)))
+                .put("isError", failed));
     }
 
-    private String runTool(String name, Map<?, ?> arguments) {
+    private String runTool(String name, JsonNode arguments) {
         return switch (name) {
             case "get_report" -> report.get();
             case "list_requests" -> AiReport.requestList(store.newestFirst(), limitArgument(arguments),
-                    Boolean.TRUE.equals(arguments.get("onlyWithFindings")));
+                    BooleanNode.TRUE.equals(arguments.path("onlyWithFindings")));
             case "get_request" -> requestText(idArgument(arguments));
             case "trace_method" -> {
                 MethodTracer.StartedTrace started = tracer.start(stringArgument(arguments, "method"));
@@ -207,99 +204,76 @@ final class McpEndpoint {
                 : text + "\n\nCall tree:\n" + ReportJson.callTreeToJson(unit, callTreePackages.names());
     }
 
-    private static int limitArgument(Map<?, ?> arguments) {
-        Object limit = arguments.get("limit");
-        if (limit == null) {
+    private static int limitArgument(JsonNode arguments) {
+        JsonNode limit = arguments.path("limit");
+        if (Json.absent(limit)) {
             return DEFAULT_REQUESTS;
         }
-        if (!(limit instanceof Long number) || number < 1 || number > MAX_REQUESTS) {
+        OptionalLong number = Json.wholeNumber(limit);
+        if (number.isEmpty() || number.getAsLong() < 1 || number.getAsLong() > MAX_REQUESTS) {
             throw new IllegalArgumentException("limit needs a whole number from 1 to " + MAX_REQUESTS
                     + ", got " + limit);
         }
-        return number.intValue();
+        return (int) number.getAsLong();
     }
 
-    private static long idArgument(Map<?, ?> arguments) {
-        if (!(arguments.get("id") instanceof Long id)) {
-            throw new IllegalArgumentException("id needs the number of a request or task, like 17");
-        }
-        return id;
+    private static long idArgument(JsonNode arguments) {
+        return Json.wholeNumber(arguments.path("id")).orElseThrow(() -> new IllegalArgumentException(
+                "id needs the number of a request or task, like 17"));
     }
 
-    private static String stringArgument(Map<?, ?> arguments, String name) {
-        if (!(arguments.get(name) instanceof String value) || value.isBlank()) {
+    private static String stringArgument(JsonNode arguments, String name) {
+        String value = textOrNull(arguments.path(name));
+        if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(name + " is required");
         }
         return value;
     }
 
-    private static void writeInitializeResult(JsonWriter json, Map<?, ?> params) {
-        Object requested = params.get("protocolVersion");
-        String version = PROTOCOL_VERSIONS.contains(requested) ? (String) requested : PROTOCOL_VERSIONS.get(0);
-        json.beginObject()
-                .name("protocolVersion").value(version)
-                .name("capabilities").beginObject()
-                .name("tools").beginObject().name("listChanged").value(false).endObject()
-                .endObject()
-                .name("serverInfo").beginObject().name("name").value("queryscope").name("version").value("1")
-                .endObject()
-                .name("instructions").value(INSTRUCTIONS)
-                .endObject();
+    private static String textOrNull(JsonNode node) {
+        return node.isString() ? node.stringValue() : null;
     }
 
-    private static void writeTools(JsonWriter json) {
-        json.beginObject().name("tools").beginArray();
-        for (Tool tool : TOOLS) {
-            json.beginObject()
-                    .name("name").value(tool.name())
-                    .name("description").value(tool.description())
-                    .name("inputSchema").beginObject()
-                    .name("type").value("object")
-                    .name("properties").beginObject();
-            for (Parameter parameter : tool.parameters()) {
-                json.name(parameter.name()).beginObject()
-                        .name("type").value(parameter.type())
-                        .name("description").value(parameter.description())
-                        .endObject();
-            }
-            json.endObject().name("required").beginArray();
-            tool.parameters().stream().filter(Parameter::required).forEach(parameter -> json.value(parameter.name()));
-            json.endArray().endObject().endObject();
-        }
-        json.endArray().endObject();
+    private static ObjectNode initializeResult(JsonNode params) {
+        String requested = textOrNull(params.path("protocolVersion"));
+        String version = PROTOCOL_VERSIONS.contains(requested) ? requested : PROTOCOL_VERSIONS.get(0);
+        return Json.object()
+                .put("protocolVersion", version)
+                .set("capabilities", Json.object().set("tools", Json.object().put("listChanged", false)))
+                .set("serverInfo", Json.object().put("name", "queryscope").put("version", "1"))
+                .put("instructions", INSTRUCTIONS);
     }
 
-    private static String response(Object id, Consumer<JsonWriter> result) {
-        JsonWriter json = new JsonWriter().beginObject().name("jsonrpc").value("2.0").name("id");
-        writeId(json, id);
-        json.name("result");
-        result.accept(json);
-        return json.endObject().toString();
+    private static ObjectNode toolJson(Tool tool) {
+        ObjectNode properties = Json.object();
+        tool.parameters().forEach(parameter -> properties.set(parameter.name(), Json.object()
+                .put("type", parameter.type())
+                .put("description", parameter.description())));
+        return Json.object()
+                .put("name", tool.name())
+                .put("description", tool.description())
+                .set("inputSchema", Json.object()
+                        .put("type", "object")
+                        .set("properties", properties)
+                        .set("required", Json.strings(tool.parameters().stream()
+                                .filter(Parameter::required)
+                                .map(Parameter::name)
+                                .toList())));
     }
 
-    private static String errorResponse(Object id, int code, String message) {
-        JsonWriter json = new JsonWriter().beginObject().name("jsonrpc").value("2.0").name("id");
-        writeId(json, id);
-        return json.name("error").beginObject()
-                .name("code").value(code)
-                .name("message").value(message)
-                .endObject().endObject().toString();
+    private static String response(JsonNode id, JsonNode result) {
+        return Json.write(envelope(id).set("result", result));
     }
 
-    private static void writeId(JsonWriter json, Object id) {
-        if (id instanceof Long number) {
-            json.value(number);
-        } else if (id instanceof Double number) {
-            json.value(number);
-        } else if (id instanceof String text) {
-            json.value(text);
-        } else {
-            json.nullValue();
-        }
+    private static String errorResponse(JsonNode id, int code, String message) {
+        return Json.write(envelope(id).set("error", Json.object()
+                .put("code", code)
+                .put("message", message)));
     }
 
-    private static Map<?, ?> mapOrEmpty(Object value) {
-        return value instanceof Map<?, ?> map ? map : Map.of();
+    private static ObjectNode envelope(JsonNode id) {
+        ObjectNode json = Json.object().put("jsonrpc", "2.0");
+        return id != null && (id.isNumber() || id.isString()) ? json.set("id", id) : json.putNull("id");
     }
 
     private record Tool(String name, String description, List<Parameter> parameters) {

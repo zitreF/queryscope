@@ -33,7 +33,7 @@ cd queryscope
 ./gradlew shadowJar
 ```
 
-This writes `build/libs/queryscope.jar`, a single jar with ByteBuddy shaded inside. Copy it anywhere, for example next
+This writes `build/libs/queryscope.jar`, a single jar with ByteBuddy and Jackson shaded inside. Copy it anywhere, for example next
 to the jar of your application. Building needs JDK 25; the jar runs on Java 17 and newer.
 
 ## Starting QueryScope

@@ -12,9 +12,10 @@ import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.findings.SlowMethod;
 import me.fertiz.queryscope.agent.findings.SlowQuery;
 import me.fertiz.queryscope.agent.findings.TooManyQueries;
-import me.fertiz.queryscope.agent.http.JsonWriter;
+import me.fertiz.queryscope.agent.http.Json;
 import me.fertiz.queryscope.agent.trace.QueryExecution;
 import me.fertiz.queryscope.agent.trace.UnitTrace;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.List;
 import java.util.Locale;
@@ -25,76 +26,57 @@ final class ReportJson {
     }
 
     static String reportsToJson(List<UnitReport> reports) {
-        JsonWriter json = new JsonWriter().beginArray();
-        reports.forEach(report -> writeReport(json, report));
-        return json.endArray().toString();
+        return Json.write(Json.array(reports, ReportJson::reportJson));
     }
 
     static String reportToJson(UnitReport report) {
-        JsonWriter json = new JsonWriter();
-        writeReport(json, report);
-        return json.toString();
+        return Json.write(reportJson(report));
     }
 
     static String callTreeToJson(UnitReport report, List<String> packages) {
         CallTree tree = report.trace().callTree();
-        JsonWriter json = new JsonWriter().beginObject()
-                .name("id").value(report.trace().id())
-                .name("durationMs").value(toMillis(report.trace().durationNanos()))
-                .name("packages").beginArray();
-        packages.forEach(name -> json.value(name));
-        json.endArray()
-                .name("truncated").value(tree.truncated())
-                .name("classesLoaded").value(report.trace().classesLoaded())
-                .name("warmUp").value(report.trace().isWarmUp());
-        writeIndexes(json, "outsideQueryIndexes", tree.outsideQueryIndexes());
-        json.name("methods").beginArray();
-        tree.topLevelCalls().forEach(node -> writeCallNode(json, node));
-        return json.endArray().endObject().toString();
+        return Json.write(Json.object()
+                .put("id", report.trace().id())
+                .put("durationMs", toMillis(report.trace().durationNanos()))
+                .set("packages", Json.strings(packages))
+                .put("truncated", tree.truncated())
+                .put("classesLoaded", report.trace().classesLoaded())
+                .put("warmUp", report.trace().isWarmUp())
+                .set("outsideQueryIndexes", Json.numbers(tree.outsideQueryIndexes()))
+                .set("methods", Json.array(tree.topLevelCalls(), ReportJson::callNodeJson)));
     }
 
-    private static void writeReport(JsonWriter json, UnitReport report) {
+    private static ObjectNode reportJson(UnitReport report) {
         UnitTrace trace = report.trace();
-        json.beginObject()
-                .name("id").value(trace.id())
-                .name("kind").value(trace.kind().name().toLowerCase(Locale.ROOT))
-                .name("method").value(trace.method())
-                .name("path").value(trace.path())
-                .name("status").value(trace.status())
-                .name("port").value(trace.localPort())
-                .name("startedAt").value(trace.startedAt().toString())
-                .name("durationMs").value(toMillis(trace.durationNanos()))
-                .name("queries").beginArray();
-        trace.queries().forEach(query -> writeQuery(json, query));
-        json.endArray()
-                .name("omittedQueries").value(trace.omittedQueries())
-                .name("omittedMs").value(toMillis(trace.omittedNanos()))
-                .name("findings").beginArray();
-        report.findings().forEach(finding -> writeFinding(json, finding));
-        json.endArray()
-                .name("methodCount").value(trace.callTree().methodCount())
-                .endObject();
+        return Json.object()
+                .put("id", trace.id())
+                .put("kind", trace.kind().name().toLowerCase(Locale.ROOT))
+                .put("method", trace.method())
+                .put("path", trace.path())
+                .put("status", trace.status())
+                .put("port", trace.localPort())
+                .put("startedAt", trace.startedAt().toString())
+                .put("durationMs", toMillis(trace.durationNanos()))
+                .set("queries", Json.array(trace.queries(), ReportJson::queryJson))
+                .put("omittedQueries", trace.omittedQueries())
+                .put("omittedMs", toMillis(trace.omittedNanos()))
+                .set("findings", Json.array(report.findings(), ReportJson::findingJson))
+                .put("methodCount", trace.callTree().methodCount());
     }
 
-    private static void writeQuery(JsonWriter json, QueryExecution query) {
-        json.beginObject()
-                .name("sql").value(query.sql())
-                .name("parameters").value(query.parameters())
-                .name("offsetMs").value(toMillis(query.offsetNanos()))
-                .name("durationMs").value(toMillis(query.durationNanos()))
-                .name("rows");
+    private static ObjectNode queryJson(QueryExecution query) {
+        ObjectNode json = Json.object()
+                .put("sql", query.sql())
+                .put("parameters", query.parameters())
+                .put("offsetMs", toMillis(query.offsetNanos()))
+                .put("durationMs", toMillis(query.durationNanos()));
         if (query.rows() == QueryExecution.NO_RESULT) {
-            json.nullValue();
+            json.putNull("rows");
         } else {
-            json.value(query.rows());
+            json.put("rows", query.rows());
         }
-        json.name("callSite").value(query.callSite())
-                .name("failed").value(query.failed())
-                .endObject();
-    }
-
-    private static void writeFinding(JsonWriter json, Finding finding) {
-        writeFindingFields(json.beginObject(), finding).endObject();
+        return json.put("callSite", query.callSite())
+                .put("failed", query.failed());
     }
 
     static String typeOf(FindingKind kind) {
@@ -109,90 +91,82 @@ final class ReportJson {
         };
     }
 
-    private static JsonWriter writeFindingFields(JsonWriter json, Finding finding) {
-        json.name("type").value(typeOf(finding.kind()));
+    private static ObjectNode findingJson(Finding finding) {
+        ObjectNode json = Json.object().put("type", typeOf(finding.kind()));
         return switch (finding.kind()) {
             case N_PLUS_ONE -> {
                 NPlusOne nPlusOne = (NPlusOne) finding;
-                yield writeRepeatedStatementFields(json, nPlusOne.normalizedSql(), nPlusOne.callSite(),
+                yield putRepeatedStatement(json, nPlusOne.normalizedSql(), nPlusOne.callSite(),
                         nPlusOne.queryIndexes(), nPlusOne.totalNanos());
             }
             case REPEATED_WRITE -> {
                 RepeatedWrite write = (RepeatedWrite) finding;
-                yield writeRepeatedStatementFields(json, write.normalizedSql(), write.callSite(),
+                yield putRepeatedStatement(json, write.normalizedSql(), write.callSite(),
                         write.queryIndexes(), write.totalNanos());
             }
             case DUPLICATE_QUERY -> {
                 DuplicateQuery duplicate = (DuplicateQuery) finding;
-                json.name("sql").value(duplicate.normalizedSql())
-                        .name("parameters").value(duplicate.parameters())
-                        .name("callSite").value(duplicate.callSite())
-                        .name("executions").value(duplicate.executions());
-                yield writeIndexes(json, "queryIndexes", duplicate.queryIndexes());
+                yield json.put("sql", duplicate.normalizedSql())
+                        .put("parameters", duplicate.parameters())
+                        .put("callSite", duplicate.callSite())
+                        .put("executions", duplicate.executions())
+                        .set("queryIndexes", Json.numbers(duplicate.queryIndexes()));
             }
             case SLOW_QUERY -> {
                 SlowQuery slow = (SlowQuery) finding;
-                yield writeQueryFindingFields(json, slow.normalizedSql(), slow.query())
-                        .name("durationMs").value(toMillis(slow.query().durationNanos()))
-                        .name("queryIndex").value(slow.queryIndex());
+                yield putQuery(json, slow.normalizedSql(), slow.query())
+                        .put("durationMs", toMillis(slow.query().durationNanos()))
+                        .put("queryIndex", slow.queryIndex());
             }
             case LARGE_RESULT -> {
                 LargeResult large = (LargeResult) finding;
-                yield writeQueryFindingFields(json, large.normalizedSql(), large.query())
-                        .name("rows").value(large.query().rows())
-                        .name("queryIndex").value(large.queryIndex());
+                yield putQuery(json, large.normalizedSql(), large.query())
+                        .put("rows", large.query().rows())
+                        .put("queryIndex", large.queryIndex());
             }
             case TOO_MANY_QUERIES -> {
                 TooManyQueries tooMany = (TooManyQueries) finding;
-                yield json.name("queries").value(tooMany.queries())
-                        .name("limit").value(tooMany.limit())
-                        .name("databaseMs").value(toMillis(tooMany.databaseNanos()))
-                        .name("durationMs").value(toMillis(tooMany.durationNanos()));
+                yield json.put("queries", tooMany.queries())
+                        .put("limit", tooMany.limit())
+                        .put("databaseMs", toMillis(tooMany.databaseNanos()))
+                        .put("durationMs", toMillis(tooMany.durationNanos()));
             }
             case SLOW_METHOD -> {
                 SlowMethod method = (SlowMethod) finding;
-                yield json.name("method").value(method.method())
-                        .name("calls").value(method.calls())
-                        .name("ownMs").value(toMillis(method.ownNanos()))
-                        .name("durationMs").value(toMillis(method.durationNanos()));
+                yield json.put("method", method.method())
+                        .put("calls", method.calls())
+                        .put("ownMs", toMillis(method.ownNanos()))
+                        .put("durationMs", toMillis(method.durationNanos()));
             }
         };
     }
 
-    private static void writeCallNode(JsonWriter json, CallNode node) {
-        json.beginObject()
-                .name("method").value(node.method())
-                .name("calls").value(node.calls())
-                .name("totalMs").value(toMillis(node.totalNanos()))
-                .name("selfMs").value(toMillis(node.selfNanos()))
-                .name("startedBeforeUnit").value(node.startedBeforeUnit());
-        writeIndexes(json, "queryIndexes", node.queryIndexes());
-        json.name("children").beginArray();
-        node.children().forEach(child -> writeCallNode(json, child));
-        json.endArray().endObject();
+    private static ObjectNode callNodeJson(CallNode node) {
+        return Json.object()
+                .put("method", node.method())
+                .put("calls", node.calls())
+                .put("totalMs", toMillis(node.totalNanos()))
+                .put("selfMs", toMillis(node.selfNanos()))
+                .put("startedBeforeUnit", node.startedBeforeUnit())
+                .set("queryIndexes", Json.numbers(node.queryIndexes()))
+                .set("children", Json.array(node.children(), ReportJson::callNodeJson));
     }
 
-    private static JsonWriter writeQueryFindingFields(JsonWriter json, String sql, QueryExecution query) {
-        return json.name("sql").value(sql)
-                .name("callSite").value(query.callSite());
+    private static ObjectNode putQuery(ObjectNode json, String sql, QueryExecution query) {
+        return json.put("sql", sql)
+                .put("callSite", query.callSite());
     }
 
-    private static JsonWriter writeRepeatedStatementFields(JsonWriter json, String sql, String callSite,
-                                                List<Integer> queryIndexes, long totalNanos) {
-        json.name("sql").value(sql)
-                .name("callSite").value(callSite)
-                .name("executions").value(queryIndexes.size())
-                .name("totalMs").value(toMillis(totalNanos));
-        return writeIndexes(json, "queryIndexes", queryIndexes);
-    }
-
-    private static JsonWriter writeIndexes(JsonWriter json, String name, List<Integer> queryIndexes) {
-        json.name(name).beginArray();
-        queryIndexes.forEach(index -> json.value(index));
-        return json.endArray();
+    private static ObjectNode putRepeatedStatement(ObjectNode json, String sql, String callSite,
+                                                   List<Integer> queryIndexes, long totalNanos) {
+        return json.put("sql", sql)
+                .put("callSite", callSite)
+                .put("executions", queryIndexes.size())
+                .put("totalMs", toMillis(totalNanos))
+                .set("queryIndexes", Json.numbers(queryIndexes));
     }
 
     static double toMillis(long nanos) {
-        return nanos / 1_000_000.0;
+        return Json.rounded(nanos / 1_000_000.0);
     }
 }

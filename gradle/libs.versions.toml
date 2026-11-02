@@ -1,5 +1,6 @@
 [versions]
 bytebuddy = "1.18.16"
+jackson = "3.1.7"
 servlet-api = "6.0.0"
 spring-boot = "4.1.2"
 shadow = "9.6.1"
@@ -7,6 +8,7 @@ shadow = "9.6.1"
 [libraries]
 bytebuddy = { module = "net.bytebuddy:byte-buddy", version.ref = "bytebuddy" }
 bytebuddy-agent = { module = "net.bytebuddy:byte-buddy-agent", version.ref = "bytebuddy" }
+jackson-databind = { module = "tools.jackson.core:jackson-databind", version.ref = "jackson" }
 servlet-api = { module = "jakarta.servlet:jakarta.servlet-api", version.ref = "servlet-api" }
 javax-servlet-api = { module = "javax.servlet:javax.servlet-api", version = "4.0.1" }
 spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }

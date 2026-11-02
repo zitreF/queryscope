@@ -163,7 +163,8 @@ attach it in production.
   fallback, and **StackWalker** for call sites
 - **JDBC** and **Servlet** APIs, with `jakarta` and `javax` both read through `MethodHandle`s
 - **JDK HttpServer** with server-sent events for the panel, written in plain HTML, CSS and JavaScript
-- **Gradle 9** with Kotlin DSL and a version catalog, and **Shadow** to shade ByteBuddy into a single jar
+- **Jackson 3** for every JSON answer and request of the panel, the hub and the MCP server
+- **Gradle 9** with Kotlin DSL and a version catalog, and **Shadow** to shade ByteBuddy and Jackson into a single jar
 - **JUnit 5**, **Spring Boot 4.1**, **Hibernate**, **HikariCP** and **H2** for the tests and the demo shop
 - **GitHub Actions** on Temurin 25 for CI, **IntelliJ IDEA**, **Git** and **GitHub**
 - **Claude Code** was used as an AI assistant for research, testing, documentation and commit messages

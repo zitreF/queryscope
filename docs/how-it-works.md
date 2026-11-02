@@ -127,9 +127,11 @@ The choices behind it:
   `java.util.concurrent` classes. It is connected to the agent through `Supplier`, `Predicate` and `Consumer` only: a
   type of its own in a signature the agent calls would be loaded once by the application's class loader while the
   agent's classes are verified, and once more by the bootstrap loader, and the JVM refuses to link the two.
-- **Isolation.** The agent ignores its own classes, ByteBuddy, `java.*`, `jdk.*`, `sun.*` and `com.sun.*`. ByteBuddy is
-  shaded into `me.fertiz.queryscope.agent.shaded`, so it never clashes with the ByteBuddy that Hibernate brings, and
-  `Nexus` injection is turned off because inlined advice does not need it.
+- **Isolation.** The agent ignores its own classes, ByteBuddy, `java.*`, `jdk.*`, `sun.*` and `com.sun.*`. ByteBuddy and
+  Jackson are shaded into `me.fertiz.queryscope.agent.shaded`, so they never clash with the ByteBuddy that Hibernate
+  brings or the Jackson of a Spring Boot app, whatever their versions, and `Nexus` injection is turned off because
+  inlined advice does not need it. The service files of the shaded jars are renamed with their classes, so an
+  application that looks up Jackson through `ServiceLoader` never finds QueryScope's copy.
 
 ## Units of work
 
@@ -290,8 +292,13 @@ it and the panel's **Copy for AI** copies it. `McpEndpoint` is a Model Context P
 plainest form: each POST carries one JSON-RPC request and gets one JSON answer, notifications get `202`, and `GET`
 gets `405` because the server never pushes messages. It answers `initialize`, `ping`, `tools/list` and `tools/call`
 for eight tools that wrap the report, the request store, the method tracer and the load tester. A tool that fails answers with
-`isError` and a sentence the assistant can act on. Requests are read with `JsonReader`, a small parser written for
-this, because QueryScope brings no JSON library.
+`isError` and a sentence the assistant can act on.
+
+All JSON goes through Jackson 3: the panel, the hub and the MCP server build their answers as Jackson trees and read
+requests with `JsonMapper.readTree`, set to refuse text after the value and nesting deeper than 64 levels. Writing
+allows 1000 levels, because the flame graph of a 256-frame stack is an object and an array per frame. Times are
+rounded to the microsecond before they are written. Every request body is read up to a limit, 1 KB for most and
+256 KB for a load test with a body of up to 64 KB, and a larger one is refused instead of cut.
 
 **Security.** The panel and the hub listen on loopback only and reject requests whose `Host` header is not
 `localhost`, `127.0.0.1` or `[::1]`, which stops DNS rebinding. The hub's attach endpoint, the only one that changes
@@ -352,8 +359,8 @@ the JDK warn about a deprecated `sun.misc.Unsafe` method on every start, so the 
 `./gradlew build` runs every test, from units to real JVMs:
 
 - **Unit tests** for the SQL normalizer, the analyzer, the options, the launcher and hub command lines, parameter
-  formatting, the session summary, the call stack, package detection, the sample store, profiles, the JSON writer, the
-  report store, the port fallback, a startup that fails, the AI report, the JSON reader, method tracing, and the panel,
+  formatting, the session summary, the call stack, package detection, the sample store, profiles, the JSON settings, the
+  report store, the port fallback, a startup that fails, the AI report, method tracing, and the panel,
   MCP and hub servers, including SSE, the `Host` check, the frame headers and the attach protection.
 - **`SamplingTest`** runs the Flight Recorder sampler and the thread dump sampler against a busy thread, and
   `JfrSamplerTest` checks the switch to thread dumps when the stream fails to start.
@@ -399,7 +406,7 @@ me.fertiz.queryscope.agent             QueryScopeAgent (premain, agentmain), Age
 ├── panel                              PanelServer, ReportStore, ReportJson, ProfileJson, ProfileQuery,
 │                                      MethodTraceJson, LoadTestJson, LoadTestRequest, McpEndpoint
 ├── hub                                HubServer, LocalProcesses, JavaProcess
-├── http                               LocalServer, HttpSupport, JsonWriter, JsonReader, Browser, shared by panel
+├── http                               LocalServer, HttpSupport, Json, Browser, shared by panel
 │                                      and hub
 └── cli                                QueryScopeLauncher (the jar's Main-Class), LaunchCommand, HubCommand
 ```

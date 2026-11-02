@@ -19,6 +19,7 @@ tasks.compileTestJava {
 
 dependencies {
     implementation(libs.bytebuddy)
+    implementation(libs.jackson.databind)
     compileOnly(libs.servlet.api)
 
     testImplementation(platform(libs.spring.boot.bom))
@@ -38,6 +39,9 @@ tasks.jar {
 tasks.shadowJar {
     archiveFileName = "queryscope.jar"
     relocate("net.bytebuddy", "me.fertiz.queryscope.agent.shaded.bytebuddy")
+    relocate("tools.jackson", "me.fertiz.queryscope.agent.shaded.jackson")
+    relocate("com.fasterxml.jackson.annotation", "me.fertiz.queryscope.agent.shaded.jackson.annotation")
+    mergeServiceFiles()
     exclude("module-info.class", "META-INF/versions/*/module-info.class")
     manifest {
         attributes(

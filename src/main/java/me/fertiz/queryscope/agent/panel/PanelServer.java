@@ -5,12 +5,13 @@ import me.fertiz.queryscope.agent.appcode.AppPackages;
 import me.fertiz.queryscope.agent.console.AiReport;
 import me.fertiz.queryscope.agent.findings.UnitReport;
 import me.fertiz.queryscope.agent.http.HttpSupport;
-import me.fertiz.queryscope.agent.http.JsonReader;
+import me.fertiz.queryscope.agent.http.Json;
 import me.fertiz.queryscope.agent.http.LocalServer;
 import me.fertiz.queryscope.agent.loadtest.LoadTester;
 import me.fertiz.queryscope.agent.methodtrace.MethodTracer;
 import me.fertiz.queryscope.agent.profiler.Profile;
 import me.fertiz.queryscope.agent.profiler.SampleStore;
+import tools.jackson.databind.JsonNode;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -43,8 +44,7 @@ public final class PanelServer {
     private static final long HEARTBEAT_SECONDS = 15;
     private static final int MAX_PENDING_EVENTS = 500;
     private static final Pattern CALLS_PATH = Pattern.compile("/api/requests/(\\d{1,18})/calls");
-    private static final Pattern TRACE_REQUEST =
-            Pattern.compile("\\{\\s*\"method\"\\s*:\\s*\"([^\"\\\\]{1,500})\"\\s*}");
+    private static final int MAX_TRACED_METHOD_LENGTH = 500;
     private static final String TRACES_PATH = "/api/traces";
     private static final String LOAD_TESTS_PATH = "/api/load-tests";
     private static final String MARKDOWN = "text/markdown; charset=utf-8";
@@ -172,18 +172,29 @@ public final class PanelServer {
         if (!requireJsonFromSameOrigin(exchange)) {
             return;
         }
-        Matcher request = TRACE_REQUEST.matcher(readBody(exchange, MAX_BODY).trim());
-        if (!request.matches()) {
+        Optional<String> method = requestedMethod(exchange);
+        if (method.isEmpty()) {
             respond(exchange, 400, JSON,
                     errorJson("Send the method as {\"method\": \"com.acme.OrderService#findAll\"}"));
             return;
         }
         try {
-            respond(exchange, 200, JSON, MethodTraceJson.startedToJson(tracer.start(request.group(1))));
+            respond(exchange, 200, JSON, MethodTraceJson.startedToJson(tracer.start(method.get())));
         } catch (IllegalArgumentException e) {
             respond(exchange, 400, JSON, errorJson(e.getMessage()));
         } catch (IllegalStateException e) {
             respond(exchange, 409, JSON, errorJson(e.getMessage()));
+        }
+    }
+
+    private static Optional<String> requestedMethod(HttpExchange exchange) throws IOException {
+        try {
+            JsonNode method = Json.read(readBody(exchange, MAX_BODY)).path("method");
+            return method.isString() && !method.stringValue().isBlank()
+                    && method.stringValue().length() <= MAX_TRACED_METHOD_LENGTH
+                    ? Optional.of(method.stringValue()) : Optional.empty();
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
         }
     }
 
@@ -216,7 +227,8 @@ public final class PanelServer {
             return;
         }
         try {
-            if (!(JsonReader.parse(readBody(exchange, MAX_BODY)) instanceof Map<?, ?> fields)) {
+            JsonNode fields = Json.read(readBody(exchange, LoadTestRequest.MAX_JSON_BYTES));
+            if (!fields.isObject()) {
                 throw new IllegalArgumentException(
                         "Send the load test as {\"id\": 17, \"requests\": 100, \"concurrency\": 10}");
             }

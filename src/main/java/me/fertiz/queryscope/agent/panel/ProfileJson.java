@@ -1,8 +1,10 @@
 package me.fertiz.queryscope.agent.panel;
 
-import me.fertiz.queryscope.agent.http.JsonWriter;
+import me.fertiz.queryscope.agent.http.Json;
 import me.fertiz.queryscope.agent.profiler.Profile;
 import me.fertiz.queryscope.agent.profiler.SampleStore;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.List;
 
@@ -15,47 +17,39 @@ final class ProfileJson {
     }
 
     static String profileToJson(Profile profile, SampleStore samples, Profile.Filter filter, List<String> packages) {
-        JsonWriter json = new JsonWriter().beginObject()
-                .name("source").value(samples.source())
-                .name("packages").beginArray();
-        packages.forEach(name -> json.value(name));
-        json.endArray()
-                .name("intervalMs").value(samples.intervalMillis())
-                .name("fromMs").value(filter.fromMillis())
-                .name("toMs").value(filter.toMillis())
-                .name("samples").value(profile.samples())
-                .name("agentSamples").value(profile.agentSamples())
-                .name("threads").beginArray();
-        profile.threads().forEach(thread -> json.beginObject()
-                .name("id").value(thread.id())
-                .name("name").value(thread.name())
-                .name("samples").value(thread.samples())
-                .endObject());
-        json.endArray().name("hot").beginArray();
-        profile.hot().forEach(method -> json.beginObject()
-                .name("method").value(method.method())
-                .name("app").value(method.app())
-                .name("self").value(method.self())
-                .name("total").value(method.total())
-                .name("selfWithLibraries").value(method.selfWithLibraries())
-                .endObject());
-        json.endArray().name("root");
-        writeNode(json, profile.root(), Math.max(1, profile.samples() / HIDDEN_BELOW_ONE_SAMPLE_IN), 0);
-        return json.endObject().toString();
+        return Json.write(Json.object()
+                .put("source", samples.source())
+                .set("packages", Json.strings(packages))
+                .put("intervalMs", samples.intervalMillis())
+                .put("fromMs", filter.fromMillis())
+                .put("toMs", filter.toMillis())
+                .put("samples", profile.samples())
+                .put("agentSamples", profile.agentSamples())
+                .set("threads", Json.array(profile.threads(), thread -> Json.object()
+                        .put("id", thread.id())
+                        .put("name", thread.name())
+                        .put("samples", thread.samples())))
+                .set("hot", Json.array(profile.hot(), method -> Json.object()
+                        .put("method", method.method())
+                        .put("app", method.app())
+                        .put("self", method.self())
+                        .put("total", method.total())
+                        .put("selfWithLibraries", method.selfWithLibraries())))
+                .set("root", nodeJson(profile.root(), Math.max(1, profile.samples() / HIDDEN_BELOW_ONE_SAMPLE_IN), 0)));
     }
 
-    private static void writeNode(JsonWriter json, Profile.Node node, int minimum, int depth) {
-        json.beginObject()
-                .name("method").value(node.method())
-                .name("app").value(node.app())
-                .name("total").value(node.total())
-                .name("self").value(node.self())
-                .name("children").beginArray();
+    private static ObjectNode nodeJson(Profile.Node node, int minimum, int depth) {
+        ArrayNode children = Json.array();
         if (depth < MAX_DEPTH) {
             node.children().stream()
                     .filter(child -> child.total() >= minimum)
-                    .forEach(child -> writeNode(json, child, minimum, depth + 1));
+                    .forEach(child -> children.add(nodeJson(child, minimum, depth + 1)));
         }
-        json.endArray().endObject();
+        return Json.object()
+                .put("method", node.method())
+                .put("app", node.app())
+                .put("total", node.total())
+                .put("self", node.self())
+                .set("children", children);
     }
 }
